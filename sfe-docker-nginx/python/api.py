@@ -109,9 +109,56 @@ app.mount("/static", StaticFiles(directory=EXPORT_DIR), name="static")
 IMAGE_TYPES = {
     "tree": "arbre_",
     "correlation": "correlation_",
+    "residus": "residus_",
+    "learning_curve": "learning_curve_",
     "dashboard": "dashboard_",
-    "feature_importance": "feature_importance_"
+    "feature_importance": "feature_importance_",
+    "shap_bar": "shap_bar_",
+    "shap_beeswarm": "shap_beeswarm_",
+    "pred_vs_real": "pred_vs_real_"
 }
+# =========================
+# ENDPOINT POUR LISTER TOUS LES GRAPHES DISPONIBLES
+# =========================
+@app.get("/graphs")
+def list_all_graphs():
+    if not os.path.exists(EXPORT_DIR):
+        return []
+    files = os.listdir(EXPORT_DIR)
+    result = []
+    for img_type, prefix in IMAGE_TYPES.items():
+        candidates = [
+            f for f in files
+            if f.startswith(prefix) and f.endswith(".png")
+        ]
+        candidates.sort(reverse=True)
+        for fname in candidates:
+            result.append({
+                "type": img_type,
+                "url": f"http://localhost:8000/static/{fname}",
+                "filename": fname
+            })
+    return result
+
+# =========================
+# ENDPOINT POUR NETTOYAGE MANUEL
+# =========================
+@app.post("/cleanup")
+def cleanup_all():
+    cleanup_json_files()
+    cleanup_images()
+    return {"status": "success", "message": "Nettoyage effectué"}
+
+# =========================
+# ENDPOINT POUR LISTER TOUS LES PARAMS JSON
+# =========================
+@app.get("/list-parameters")
+def list_parameters():
+    if not os.path.exists(PARAMS_DIR):
+        return []
+    files = [f for f in os.listdir(PARAMS_DIR) if f.endswith('.json')]
+    files.sort(reverse=True)
+    return files
 
 # =========================
 # GET LATEST IMAGES

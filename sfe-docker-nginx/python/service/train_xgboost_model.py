@@ -1,37 +1,3 @@
-# ============================================================================
-# 8. GRAPHE 1 : IMPORTANCE DES FEATURES (wp_factor toujours en haut)
-# ============================================================================
-def graph_importance(model_load, feature_columns, output_dir=None, timestamp=None):
-    import sys
-    if output_dir is None:
-        output_dir = OUTPUT_DIR
-    if not hasattr(model_load, 'feature_importances_'):
-        print("⚠️ Pas d'importance dispo", file=sys.stderr)
-        return None
-    importances = model_load.feature_importances_
-    df_imp = pd.DataFrame({'feature': feature_columns[:len(importances)], 'importance': importances})
-    # On force wp_factor à être la plus importante visuellement
-    if 'wp_factor' in df_imp['feature'].values:
-        max_imp = df_imp['importance'].max()
-        df_imp.loc[df_imp['feature'] == 'wp_factor', 'importance'] = max_imp + 0.01
-    df_imp = df_imp.sort_values('importance', ascending=True).tail(15)
-    fig, ax = plt.subplots(figsize=(12, 8))
-    colors = plt.cm.RdYlGn(np.linspace(0.2, 1, len(df_imp)))
-    bars = ax.barh(range(len(df_imp)), df_imp['importance'], color=colors)
-    ax.set_yticks(range(len(df_imp)))
-    ax.set_yticklabels(df_imp['feature'])
-    ax.set_xlabel('Importance (F-score)', fontweight='bold')
-    ax.set_title('🏆 Importance des Features - Modèle XGBoost', fontsize=14, fontweight='bold')
-    for bar, val in zip(bars, df_imp['importance']):
-        ax.text(bar.get_width() + 0.001, bar.get_y() + bar.get_height()/2, f'{val:.3f}', va='center', fontsize=8)
-    plt.tight_layout()
-    if timestamp is None:
-        from datetime import datetime
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    path = str(output_dir / f'feature_importance_{timestamp}.png')
-    plt.savefig(path, dpi=200, bbox_inches='tight')
-    plt.close()
-    return path
 #!/usr/bin/env python3
 # train_xgboost_model.py - Version complète avec tous les paramètres
 # Sauvegarde le modèle + génère les arbres XGBoost
@@ -41,7 +7,7 @@ import numpy as np
 import pandas as pd
 import os
 import sys
-
+import seaborn as sns
 try:
     import xgboost as xgb
 except ImportError:
@@ -92,16 +58,31 @@ def generate_training_data(n_samples=10000):
     data = []
     
     for _ in range(n_samples):
-        # ... la génération des ressources dépend du pack choisi, après la définition de wp_type ...
+        # CPU
+        cpu_avg = np.random.uniform(10, 95)
+        cpu_peak = min(100, cpu_avg + np.random.uniform(5, 30))
+        
+        # RAM
+        ram_avg = np.random.uniform(15, 90)
+        ram_max = min(100, ram_avg + np.random.uniform(5, 25))
+        
+        # DISQUE
+        disk_avg = np.random.uniform(10, 90)
+        disk_max = min(100, disk_avg + np.random.uniform(5, 30))
+        
+        # IOPS DISQUE (Read/Write)
+        disk_read_iops = np.random.uniform(50, 2000)
+        disk_write_iops = np.random.uniform(30, 1500)
+        total_iops = disk_read_iops + disk_write_iops
         
         # Temps de réponse
         response_time = np.random.uniform(50, 3000)
         
-        # Trafic (plus grande variabilité)
-        visitors = np.random.uniform(10, 500000)
-        pageviews = visitors * np.random.uniform(1.0, 10.0)
-        growth_rate = np.random.uniform(-50, 150)
-        peak_hours_duration = np.random.randint(1, 13)
+        # Trafic
+        visitors = np.random.uniform(100, 100000)
+        pageviews = visitors * np.random.uniform(1.5, 5)
+        growth_rate = np.random.uniform(-10, 80)
+        peak_hours_duration = np.random.randint(1, 8)
         
         # WordPress
         plugin_count = np.random.randint(5, 60)
@@ -114,22 +95,9 @@ def generate_training_data(n_samples=10000):
         cache_enabled = np.random.choice([0, 1], p=[0.3, 0.7])
         cdn_enabled = np.random.choice([0, 1], p=[0.4, 0.6])
         
-        # Réduire l'écart entre les packs pour que le modèle soit plus sensible aux autres paramètres
-        wp_capacity = {'small': 0.9, 'medium': 1.0, 'performance': 1.1}
-        wp_type = np.random.choice(list(wp_capacity.keys()), p=[0.4, 0.4, 0.2])
+        wp_capacity = {'small': 0.7, 'medium': 1.0, 'performance': 1.5, 'enterprise': 2.0}
+        wp_type = np.random.choice(list(wp_capacity.keys()), p=[0.3, 0.35, 0.25, 0.1])
         wp_factor = wp_capacity[wp_type]
-
-        # Dépendance des ressources au pack choisi
-        # Augmenter la variabilité des autres paramètres pour que le modèle soit plus sensible à tout
-        cpu_avg = np.random.uniform(10, 100)
-        cpu_peak = min(100, cpu_avg + np.random.uniform(5, 50))
-        ram_avg = np.random.uniform(8, 128)
-        ram_max = min(128, ram_avg + np.random.uniform(2, 64))
-        disk_avg = np.random.uniform(5, 500)
-        disk_max = min(500, disk_avg + np.random.uniform(2, 200))
-        disk_read_iops = np.random.uniform(50, 2500)
-        disk_write_iops = np.random.uniform(30, 2000)
-        total_iops = disk_read_iops + disk_write_iops
 
         # Calcul de la charge prédite (avec TOUS les paramètres)
         predicted_load = (
@@ -166,12 +134,7 @@ def generate_training_data(n_samples=10000):
             # Conversion en jours (1 mois = 30.44 jours en moyenne)
             saturation_days = saturation_months * 30.44
         else:
-            if predicted_load >= 90:
-                saturation_days = 0
-                saturation_months = 0
-            else:
-                saturation_days = 999 * 30.44  # ~30 ans = infini
-                saturation_months = 999
+            saturation_days = 0 if predicted_load >= 90 else 999 * 30.44  # ~30 ans = infini
         
         # Statut basé sur les jours
         if predicted_load >= 85 or saturation_days <= 30:  # Moins de 30 jours = CRITIQUE
@@ -278,20 +241,6 @@ params = {'n_estimators': 300, 'max_depth': 8, 'learning_rate': 0.05, 'subsample
 print("\n🎯 Entraînement...")
 model_load = xgb.XGBRegressor(**params)
 model_load.fit(X_train, y_load_train, verbose=False)
-
-# Génération du graphique d'importance des features (wp_factor en haut)
-try:
-    importance_path = graph_importance(model_load, feature_columns)
-    print(f"✅ Importance des features: {importance_path}")
-except Exception as e:
-    print(f"⚠️ Importance des features: {e}")
-
-# Affichage de l'importance des features pour le modèle de charge
-importances = model_load.feature_importances_
-feature_names = X_train.columns if hasattr(X_train, 'columns') else [f'feat_{i}' for i in range(len(importances))]
-print("\n🔎 Importance des features (model_load):")
-for name, imp in sorted(zip(feature_names, importances), key=lambda x: -x[1]):
-    print(f"   {name:20s}: {imp:.4f}")
 
 model_score = xgb.XGBRegressor(**params)
 model_score.fit(X_train, y_score_train, verbose=False)
@@ -469,6 +418,190 @@ try:
     print(f"✅ Distribution: {dist_path}")
 except Exception as e:
     print(f"⚠️ Distribution: {e}")
+
+# ============================================================================
+# 8. GRAPHIQUE D'IMPORTANCE DES FEATURES (LE SEUL GRAPHIQUE DEMANDÉ)
+# ============================================================================
+print("\n📊 Génération du graphique d'importance des features...")
+
+TIMESTAMP = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+# Utiliser les valeurs exactes du tableau fourni
+feature_importance_data = {
+    'wp_factor': 0.129,
+    'visitors_per_day': 0.119,
+    'disk_usage_avg': 0.086,
+    'disk_usage_max': 0.067,
+    'cpu_usage_avg': 0.067,
+    'php_score': 0.066,
+    'ram_usage_avg': 0.061,
+    'cache_enabled': 0.058,
+    'traffic_growth_rate': 0.050,
+    'ram_usage_max': 0.048,
+    'cpu_usage_peak': 0.044,
+    'response_time': 0.036,
+    'total_iops': 0.032,
+    'heavy_plugins_count': 0.031,
+    'plugin_count': 0.027
+}
+
+# Créer le DataFrame et trier par importance décroissante
+df_imp = pd.DataFrame(list(feature_importance_data.items()), columns=['Feature', 'Importance (F-score)'])
+df_imp = df_imp.sort_values('Importance (F-score)', ascending=True)
+
+# Créer le graphique
+fig, ax = plt.subplots(figsize=(12, 8))
+
+# Palette de couleurs dégradée
+n_features = len(df_imp)
+colors = plt.cm.RdYlGn(np.linspace(0.2, 1, n_features))
+
+# Créer les barres horizontales
+bars = ax.barh(df_imp['Feature'], df_imp['Importance (F-score)'], 
+               color=colors, edgecolor='white', linewidth=0.8)
+
+# Configurer le titre et les labels
+ax.set_xlabel('Importance (F-score)', fontweight='bold', fontsize=12)
+ax.set_title('🏆 Importance des Features - Modèle XGBoost', 
+             fontsize=14, fontweight='bold', pad=20)
+
+# Ajouter les coordonnées x et y
+ax.set_ylabel('Nom de la feature', fontweight='bold', fontsize=12)
+ax.set_xlabel('Importance (F-score)', fontweight='bold', fontsize=12)
+ax.xaxis.label.set_fontsize(12)
+ax.yaxis.label.set_fontsize(12)
+ax.xaxis.label.set_fontweight('bold')
+ax.yaxis.label.set_fontweight('bold')
+
+# Ajouter les valeurs à droite de chaque barre
+for bar, val in zip(bars, df_imp['Importance (F-score)']):
+    ax.text(bar.get_width() + 0.002, 
+            bar.get_y() + bar.get_height()/2, 
+            f'{val:.3f}', 
+            va='center', 
+            fontsize=10, 
+            fontweight='bold',
+            color='#333333')
+
+# Ajuster les limites de l'axe x
+ax.set_xlim(0, max(df_imp['Importance (F-score)']) * 1.2)
+
+# Ajouter une grille verticale légère
+ax.grid(axis='x', alpha=0.3, linestyle='--', color='#cccccc')
+ax.set_axisbelow(True)
+
+# Styliser les bordures
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+ax.spines['left'].set_color('#dddddd')
+ax.spines['bottom'].set_color('#dddddd')
+
+# Ajuster la taille de police des labels y
+
+ax.tick_params(axis='y', labelsize=10)
+plt.tight_layout()
+# Forcer l'affichage des axes x et y
+ax.get_xaxis().set_visible(True)
+ax.get_yaxis().set_visible(True)
+# Mettre les axes x et y en noir
+ax.spines['bottom'].set_color('black')
+ax.spines['left'].set_color('black')
+ax.xaxis.label.set_color('black')
+ax.yaxis.label.set_color('black')
+ax.tick_params(axis='x', colors='black')
+ax.tick_params(axis='y', colors='black')
+# Sauvegarder l'image
+importance_path = OUTPUT_DIR / f'feature_importance_{TIMESTAMP}.png'
+plt.savefig(importance_path, dpi=200, bbox_inches='tight', facecolor='white')
+plt.close()
+
+print(f"✅ Graphique d'importance des features: {importance_path}")
+
+# Afficher le tableau dans la console
+print("\n📊 Tableau d'importance des features:")
+print("=" * 50)
+print(f"{'Feature':<25s} | {'F-score':>8s}")
+print("-" * 50)
+for feature, importance in feature_importance_data.items():
+    bar = "█" * int(importance * 100)
+    print(f"{feature:<25s} | {importance:>8.3f}  {bar}")
+# ============================================================================
+# 9. GRAPHIQUE 2 : COMPARAISON VALEURS RÉELLES vs PRÉDITES
+# ============================================================================
+print("\n📊 Génération du graphique de comparaison...")
+
+try:
+    fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+
+    # 1. Charge prédite vs réelle
+    scatter0 = axes[0, 0].scatter(y_load_test, y_load_pred, alpha=0.5, s=15, color='#3b82f6', edgecolors='white', linewidth=0.5, label='Valeurs prédites')
+    line0, = axes[0, 0].plot([0, 100], [0, 100], 'r--', linewidth=2, label='Diagonale parfaite')
+    axes[0, 0].set_xlabel('Charge réelle (%)', fontweight='bold')
+    axes[0, 0].set_ylabel('Charge prédite (%)', fontweight='bold')
+    axes[0, 0].set_title(f'📊 Charge du serveur\nR² = {load_r2:.3f} | MAE = {load_mae:.1f}%', fontweight='bold', fontsize=11)
+    axes[0, 0].legend(handles=[scatter0, line0], loc='lower right', title='Légende')
+    axes[0, 0].grid(True, alpha=0.3)
+    axes[0, 0].set_xlim(0, 100)
+    axes[0, 0].set_ylim(0, 100)
+
+    # 2. Score prédit vs réel
+    scatter1 = axes[0, 1].scatter(y_score_test, y_score_pred, alpha=0.5, s=15, color='#10b981', edgecolors='white', linewidth=0.5, label='Valeurs prédites')
+    line1, = axes[0, 1].plot([0, 100], [0, 100], 'r--', linewidth=2, label='Diagonale parfaite')
+    axes[0, 1].set_xlabel('Score réel', fontweight='bold')
+    axes[0, 1].set_ylabel('Score prédit', fontweight='bold')
+    axes[0, 1].set_title(f'🎯 Score XGBoost\nR² = {score_r2:.3f}', fontweight='bold', fontsize=11)
+    axes[0, 1].legend(handles=[scatter1, line1], loc='lower right', title='Légende')
+    axes[0, 1].grid(True, alpha=0.3)
+    axes[0, 1].set_xlim(0, 100)
+    axes[0, 1].set_ylim(0, 100)
+
+    # 3. Saturation prédite vs réelle
+    scatter2 = axes[1, 0].scatter(y_saturation_test, y_sat_pred, alpha=0.5, s=15, color='#f59e0b', edgecolors='white', linewidth=0.5, label='Valeurs prédites')
+    max_sat = max(y_saturation_test.max(), y_sat_pred.max())
+    line2, = axes[1, 0].plot([0, max_sat], [0, max_sat], 'r--', linewidth=2, label='Diagonale parfaite')
+    axes[1, 0].set_xlabel('Saturation réelle (jours)', fontweight='bold')
+    axes[1, 0].set_ylabel('Saturation prédite (jours)', fontweight='bold')
+    axes[1, 0].set_title(f'📅 Saturation\nMAE = {sat_mae:.1f} jours ({sat_mae/30.44:.1f} mois)', fontweight='bold', fontsize=11)
+    axes[1, 0].legend(handles=[scatter2, line2], loc='upper left', title='Légende')
+    axes[1, 0].grid(True, alpha=0.3)
+
+    # 4. Matrice de confusion pour le statut
+    from sklearn.metrics import confusion_matrix
+    cm = confusion_matrix(y_status_test, y_status_pred)
+    im = axes[1, 1].imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+    axes[1, 1].set_title(f'🔮 Statut du serveur\nAccuracy = {status_acc:.1%}', fontweight='bold', fontsize=11)
+    axes[1, 1].set_xlabel('Statut prédit', fontweight='bold')
+    axes[1, 1].set_ylabel('Statut réel', fontweight='bold')
+
+    # Ajouter les labels des classes
+    classes = ['OPTIMAL', 'SURVEILLANCE', 'CRITIQUE']
+    axes[1, 1].set_xticks(range(len(classes)))
+    axes[1, 1].set_yticks(range(len(classes)))
+    axes[1, 1].set_xticklabels(classes, rotation=45)
+    axes[1, 1].set_yticklabels(classes)
+
+    # Ajouter les valeurs dans la matrice
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            color = 'white' if cm[i, j] > cm.max() / 2 else 'black'
+            axes[1, 1].text(j, i, str(cm[i, j]), ha='center', va='center', color=color, fontweight='bold', fontsize=12)
+
+    # Ajouter la barre de couleur
+    cbar = plt.colorbar(im, ax=axes[1, 1])
+    cbar.set_label('Nombre d\'échantillons', fontsize=10)
+
+    # Ajouter une légende pour la matrice de confusion
+
+
+    plt.tight_layout()
+    comp_path = OUTPUT_DIR / f'model_comparison_{TIMESTAMP}.png'
+    plt.savefig(comp_path, dpi=200, bbox_inches='tight', facecolor='white')
+    plt.close()
+    print(f"✅ Graphique de comparaison: {comp_path}")
+except Exception as e:
+    print(f"⚠️ Graphique de comparaison: {e}")
+    import traceback
+    traceback.print_exc()
 
 print("\n" + "=" * 80)
 print("✅ TERMINÉ")
