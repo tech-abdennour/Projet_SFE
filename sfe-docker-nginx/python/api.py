@@ -4,6 +4,14 @@ import os
 import json
 import glob
 import subprocess
+from pathlib import Path
+
+# =========================
+# PATHS (DOCKER SAFE)
+# =========================
+BASE_DIR = "/app/service"
+EXPORT_DIR = os.path.join(BASE_DIR, "analysis_exports")
+os.makedirs(EXPORT_DIR, exist_ok=True)
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +26,26 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'script'))
 # =========================
 # DOWNLOAD LATEST JSON PARAMETER FILE
 # =========================
+
 app = FastAPI()
+
+# =========================
+# DOWNLOAD FEATURE IMPORTANCE
+# =========================
+@app.get("/download/feature-importance")
+def download_feature_importance():
+    # Chercher le fichier feature_importance le plus récent
+    fi_files = glob.glob(os.path.join(EXPORT_DIR, "feature_importance_*.png"))
+    if not fi_files:
+        return {"status": "error", "message": "Graphique d'importance des features non trouvé. Lancez un entraînement d'abord."}
+    fi_files.sort(reverse=True)
+    file_path = fi_files[0]
+    return FileResponse(
+        file_path,
+        media_type="image/png",
+        filename=os.path.basename(file_path),
+        headers={"Content-Disposition": f"attachment; filename={os.path.basename(file_path)}"}
+    )
 PARAMS_DIR = "/app/Donnee_parametres"
 # =========================
 # ENDPOINT POUR SAUVEGARDER LES PARAMÈTRES EN JSON
@@ -68,15 +95,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# =========================
-# PATHS (DOCKER SAFE)
-# =========================
-BASE_DIR = "/app/service"
-PRED_SCRIPT = os.path.join(BASE_DIR, "predict_from_file.py")
-EXPORT_DIR = os.path.join(BASE_DIR, "analysis_exports")
 
-# Créer le dossier s'il n'existe pas
-os.makedirs(EXPORT_DIR, exist_ok=True)
+PRED_SCRIPT = os.path.join(BASE_DIR, "predict_from_file.py")
 
 # =========================
 # STATIC FILES

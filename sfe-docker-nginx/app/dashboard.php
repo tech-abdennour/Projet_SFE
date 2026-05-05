@@ -771,7 +771,14 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="card"><h3>📊 Scores de Performance</h3><div id="scoresDisplay"></div></div>
             <div class="card"><h3>💡 Recommandation</h3><div id="recommendationDisplay"></div></div>
             <div class="card" id="imagesContainer" style="display:none;"><h3>🖼️ Graphiques d'analyse</h3><div class="images-grid" id="imagesDisplay"></div></div>
-            <div class="card" id="treeDownloads"><h3>🌳 Téléchargement des arbres XGBoost</h3><div class="tree-links"><a href="http://localhost:8000/download/tree0" class="tree-link" download>📥 Tree 0</a><a href="http://localhost:8000/download/tree-final" class="tree-link" download>📥 Tree Final</a></div></div>
+            <div class="card" id="treeDownloads">
+                <h3>🌳 Téléchargement des arbres XGBoost</h3>
+                <div class="tree-links">
+                    <a href="http://localhost:8000/download/tree0" class="tree-link" download>📥 Tree 0</a>
+                    <a href="http://localhost:8000/download/tree-final" class="tree-link" download>📥 Tree Final</a>
+                    <a href="http://localhost:8000/download/feature-importance" class="tree-link" download>📊 Features</a>
+                </div>
+            </div>
         </div>
     </div>
 
