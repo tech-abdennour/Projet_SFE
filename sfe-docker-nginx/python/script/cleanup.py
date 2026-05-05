@@ -67,6 +67,8 @@ def cleanup_images():
 
     # Supprimer toutes les images PNG sauf les protégées
     protected_files = {"saturation_distribution.png", "xgboost_tree_0.png", "xgboost_tree_final.png"}
+    # Ajouter tous les fichiers feature_importance_*.png à la liste des protégés
+    protected_files.update({os.path.basename(f) for f in glob.glob(os.path.join(EXPORTS_DIR, "feature_importance_*.png"))})
     all_images = glob.glob(os.path.join(EXPORTS_DIR, "*.png"))
     if not all_images:
         log(f"   ✅ 0 image → rien à supprimer")
