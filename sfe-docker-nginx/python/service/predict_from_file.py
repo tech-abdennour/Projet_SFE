@@ -254,32 +254,7 @@ def predict(model_load, scaler, features_dict, feature_columns):
     }
 
 
-# ============================================================================
-# 4. GRAPHE 1 : IMPORTANCE DES FEATURES
-# ============================================================================
-def graph_importance(model_load, feature_columns):
-    if not hasattr(model_load, 'feature_importances_'):
-        print("⚠️ Pas d'importance dispo", file=sys.stderr)
-        return None
-    
-    importances = model_load.feature_importances_
-    df_imp = pd.DataFrame({'feature': feature_columns[:len(importances)], 'importance': importances})
-    df_imp = df_imp.sort_values('importance', ascending=True).tail(15)
-    
-    fig, ax = plt.subplots(figsize=(12, 8))
-    colors = plt.cm.RdYlGn(np.linspace(0.2, 1, len(df_imp)))
-    bars = ax.barh(range(len(df_imp)), df_imp['importance'], color=colors)
-    ax.set_yticks(range(len(df_imp)))
-    ax.set_yticklabels(df_imp['feature'])
-    ax.set_xlabel('Importance (F-score)', fontweight='bold')
-    ax.set_title('🏆 Importance des Features - Modèle XGBoost', fontsize=14, fontweight='bold')
-    for bar, val in zip(bars, df_imp['importance']):
-        ax.text(bar.get_width() + 0.001, bar.get_y() + bar.get_height()/2, f'{val:.3f}', va='center', fontsize=8)
-    plt.tight_layout()
-    path = str(OUTPUT_DIR / f'feature_importance_{TIMESTAMP}.png')
-    plt.savefig(path, dpi=200, bbox_inches='tight')
-    plt.close()
-    return path
+
 
 
 # ============================================================================
@@ -519,14 +494,12 @@ def main():
         print(f"   Mois: {result['saturation_months']}, Jours: {result['saturation_jours']}", file=sys.stderr)
     
     # Générer les graphiques + arbre
-    g1 = graph_importance(model_load, feature_columns)
     g2 = graph_metrics(features_dict, result, json_file)
     g3 = graph_correlation(features_dict)
     g4 = graph_arbre(features_dict, result, json_file)
     
     images = []
     base_url = "http://localhost:8000/static/"
-    if g1: images.append({"type": "feature_importance", "url": base_url + os.path.basename(g1)})
     if g2: images.append({"type": "dashboard", "url": base_url + os.path.basename(g2)})
     if g3: images.append({"type": "correlation", "url": base_url + os.path.basename(g3)})
     if g4: images.append({"type": "tree", "url": base_url + os.path.basename(g4)})

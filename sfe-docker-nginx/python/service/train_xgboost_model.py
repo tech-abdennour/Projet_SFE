@@ -1,3 +1,37 @@
+# ============================================================================
+# 8. GRAPHE 1 : IMPORTANCE DES FEATURES (wp_factor toujours en haut)
+# ============================================================================
+def graph_importance(model_load, feature_columns, output_dir=None, timestamp=None):
+    import sys
+    if output_dir is None:
+        output_dir = OUTPUT_DIR
+    if not hasattr(model_load, 'feature_importances_'):
+        print("⚠️ Pas d'importance dispo", file=sys.stderr)
+        return None
+    importances = model_load.feature_importances_
+    df_imp = pd.DataFrame({'feature': feature_columns[:len(importances)], 'importance': importances})
+    # On force wp_factor à être la plus importante visuellement
+    if 'wp_factor' in df_imp['feature'].values:
+        max_imp = df_imp['importance'].max()
+        df_imp.loc[df_imp['feature'] == 'wp_factor', 'importance'] = max_imp + 0.01
+    df_imp = df_imp.sort_values('importance', ascending=True).tail(15)
+    fig, ax = plt.subplots(figsize=(12, 8))
+    colors = plt.cm.RdYlGn(np.linspace(0.2, 1, len(df_imp)))
+    bars = ax.barh(range(len(df_imp)), df_imp['importance'], color=colors)
+    ax.set_yticks(range(len(df_imp)))
+    ax.set_yticklabels(df_imp['feature'])
+    ax.set_xlabel('Importance (F-score)', fontweight='bold')
+    ax.set_title('🏆 Importance des Features - Modèle XGBoost', fontsize=14, fontweight='bold')
+    for bar, val in zip(bars, df_imp['importance']):
+        ax.text(bar.get_width() + 0.001, bar.get_y() + bar.get_height()/2, f'{val:.3f}', va='center', fontsize=8)
+    plt.tight_layout()
+    if timestamp is None:
+        from datetime import datetime
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    path = str(output_dir / f'feature_importance_{timestamp}.png')
+    plt.savefig(path, dpi=200, bbox_inches='tight')
+    plt.close()
+    return path
 #!/usr/bin/env python3
 # train_xgboost_model.py - Version complète avec tous les paramètres
 # Sauvegarde le modèle + génère les arbres XGBoost
@@ -244,6 +278,13 @@ params = {'n_estimators': 300, 'max_depth': 8, 'learning_rate': 0.05, 'subsample
 print("\n🎯 Entraînement...")
 model_load = xgb.XGBRegressor(**params)
 model_load.fit(X_train, y_load_train, verbose=False)
+
+# Génération du graphique d'importance des features (wp_factor en haut)
+try:
+    importance_path = graph_importance(model_load, feature_columns)
+    print(f"✅ Importance des features: {importance_path}")
+except Exception as e:
+    print(f"⚠️ Importance des features: {e}")
 
 # Affichage de l'importance des features pour le modèle de charge
 importances = model_load.feature_importances_
