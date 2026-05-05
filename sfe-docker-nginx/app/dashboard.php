@@ -526,13 +526,16 @@ function saveParamsToPythonAPI(params) {
     .then(function(res) {
         if (res.status === "success") {
             showToast("Paramètres sauvegardés dans Donnee_parametres !");
+            console.log("[SUCCÈS] API Python:", res);
         } else {
-            showToast("Erreur sauvegarde API Python", true);
+            showToast(res.error ? ("Erreur API Python: " + res.error) : "Erreur sauvegarde API Python", true);
+            console.error("[ERREUR] API Python:", res);
         }
         return res.status === "success";
     })
-    .catch(function() {
-        showToast("Erreur API Python", true);
+    .catch(function(err) {
+        showToast("Erreur API Python: " + (err && err.message ? err.message : err), true);
+        console.error("[ERREUR] API Python (catch):", err);
         return false;
     });
 }
@@ -582,16 +585,19 @@ function runAnalysis() {
                 displayImages(res.output.images);
                 document.getElementById('resultsContainer').style.display = 'block';
                 showToast('Prédiction terminée !');
-                // Stocker le résultat dans sessionStorage pour accès depuis Sauvegardes
+                console.log('[SUCCÈS] Prédiction:', res);
                 sessionStorage.setItem('lastPrediction', JSON.stringify(currentPrediction));
             } else {
-                showToast('Erreur API', true);
+                var msg = res.error ? ('Erreur API: ' + res.error) : 'Erreur API';
+                showToast(msg, true);
                 document.getElementById('noResults').style.display = 'block';
+                console.error('[ERREUR] Prédiction:', res);
             }
         })
-        .catch(function() {
+        .catch(function(err) {
             document.getElementById('loadingResults').style.display = 'none';
-            showToast('API indisponible', true);
+            showToast('API indisponible: ' + (err && err.message ? err.message : err), true);
+            console.error('[ERREUR] Prédiction (catch):', err);
         });
     });
 }
@@ -613,18 +619,21 @@ function saveCurrentResult() {
     .then(function(res) { 
         if (res.success) {
             showToast('Analyse sauvegardée !');
-            console.log('SAUVEGARDE REUSSIE');
+            console.log('[SUCCÈS] Sauvegarde:', res);
             setTimeout(function() { location.reload(); }, 1500);
         } else {
-            showToast('Erreur', true);
+            var msg = res.error ? ('Erreur sauvegarde: ' + res.error) : 'Erreur sauvegarde inconnue';
+            showToast(msg, true);
             btn.disabled = false;
             btn.innerHTML = 'Sauvegarder dans l\'historique';
-            if (res.error) {
-                console.log('SAUVEGARDE ECHOUEE :', res.error);
-            } else {
-                console.log('SAUVEGARDE ECHOUEE : Erreur inconnue', res);
-            }
+            console.error('[ERREUR] Sauvegarde:', res);
         }
+    })
+    .catch(function(err) {
+        showToast('Erreur sauvegarde: ' + (err && err.message ? err.message : err), true);
+        btn.disabled = false;
+        btn.innerHTML = 'Sauvegarder dans l\'historique';
+        console.error('[ERREUR] Sauvegarde (catch):', err);
     });
 }
 
@@ -635,8 +644,23 @@ function saveAsJson() {
     fetch(window.location.href, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify({ action: 'save_json', result_data: currentPrediction }) })
     .then(function(r) { return r.json(); })
     .then(function(res) { 
-        if (res.success) { showToast('Sauvegarde JSON effectuée !'); setTimeout(function() { location.reload(); }, 1500); }
-        else { showToast('Erreur', true); btn.disabled = false; btn.innerHTML = 'Sauvegarde JSON (sans images)'; }
+        if (res.success) {
+            showToast('Sauvegarde JSON effectuée !');
+            console.log('[SUCCÈS] Sauvegarde JSON:', res);
+            setTimeout(function() { location.reload(); }, 1500);
+        } else {
+            var msg = res.error ? ('Erreur sauvegarde JSON: ' + res.error) : 'Erreur sauvegarde JSON inconnue';
+            showToast(msg, true);
+            btn.disabled = false;
+            btn.innerHTML = 'Sauvegarde JSON (sans images)';
+            console.error('[ERREUR] Sauvegarde JSON:', res);
+        }
+    })
+    .catch(function(err) {
+        showToast('Erreur sauvegarde JSON: ' + (err && err.message ? err.message : err), true);
+        btn.disabled = false;
+        btn.innerHTML = 'Sauvegarde JSON (sans images)';
+        console.error('[ERREUR] Sauvegarde JSON (catch):', err);
     });
 }
 
@@ -650,7 +674,21 @@ function ajaxAction(action, id) {
     if (id) body[action + '_id'] = id;
     fetch(window.location.href, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify(body) })
     .then(function(r) { return r.json(); })
-    .then(function(res) { if (res.success) { showToast('Terminé'); setTimeout(function() { location.reload(); }, 1000); } });
+    .then(function(res) {
+        if (res.success) {
+            showToast('Terminé');
+            console.log('[SUCCÈS] Action', action, ':', res);
+            setTimeout(function() { location.reload(); }, 1000);
+        } else {
+            var msg = res.error ? ('Erreur action ' + action + ': ' + res.error) : ('Erreur action ' + action);
+            showToast(msg, true);
+            console.error('[ERREUR] Action', action, ':', res);
+        }
+    })
+    .catch(function(err) {
+        showToast('Erreur action ' + action + ': ' + (err && err.message ? err.message : err), true);
+        console.error('[ERREUR] Action', action, '(catch):', err);
+    });
 }
 
 document.addEventListener('DOMContentLoaded', function() {
