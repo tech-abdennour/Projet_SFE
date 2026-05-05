@@ -17,7 +17,7 @@
   "status": {
     "accuracy": 0.987
   },
-  "training_date": "2026-05-05T10:15:36.010641",
+  "training_date": "2026-05-05T14:03:16.737878",
   "n_samples": 10000,
   "n_features": 20,
   "feature_columns": [
