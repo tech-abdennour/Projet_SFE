@@ -1,0 +1,23 @@
+{
+  "cpu_usage_avg": 3,
+  "cpu_usage_peak": 4,
+  "ram_usage_avg": 5,
+  "ram_usage_max": 6,
+  "disk_usage_avg": 0,
+  "disk_usage_max": 0,
+  "disk_read_iops": 0,
+  "disk_write_iops": 0,
+  "response_time": 0,
+  "visitors_per_day": 1,
+  "pageviews_per_day": 0,
+  "traffic_growth_rate": 1,
+  "peak_hours_start": "",
+  "peak_hours_end": "",
+  "peak_hours": 4,
+  "plugin_count": 5,
+  "heavy_plugins": "",
+  "php_version": "none",
+  "cache_enabled": "none",
+  "cdn_enabled": "none",
+  "wp_type": "small"
+}
