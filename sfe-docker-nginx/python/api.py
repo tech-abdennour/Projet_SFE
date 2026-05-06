@@ -1,10 +1,9 @@
-
-
 import sys
 import os
 import json
 import glob
 import subprocess
+from threading import Thread
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,9 +12,10 @@ from script.cleanup import cleanup_json_files, cleanup_images
 from datetime import datetime
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'script'))
 
-
-
-
+# =========================
+# FASTAPI APP
+# =========================
+app = FastAPI()
 
 # =========================
 # PATHS (DOCKER SAFE)
@@ -23,11 +23,139 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'script'))
 BASE_DIR = "/app/service"
 PARAMS_DIR = "/app/Donnee_parametres"
 GRAPHE_DIR = os.path.join(BASE_DIR, "graphe")
+EXPORT_DIR = os.path.join(BASE_DIR, "analysis_exports")
+
+# Créer le dossier s'il n'existe pas
+os.makedirs(EXPORT_DIR, exist_ok=True)
 
 # =========================
-# DOWNLOAD LATEST JSON PARAMETER FILE
+# CORS
 # =========================
-app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# =========================
+# STATIC FILES
+# =========================
+app.mount("/static", StaticFiles(directory=EXPORT_DIR), name="static")
+
+# =========================
+# ENDPOINT POUR LANCER LES GRAPHIQUES
+# =========================
+@app.post("/run/graphe-xgboost-model")
+def run_graphe_xgboost_model():
+    """
+    Lance la génération de tous les graphiques d'analyse.
+    """
+    try:
+        # Import local pour éviter les problèmes de scope
+        service_dir = os.path.join(os.path.dirname(__file__), "service")
+        if service_dir not in sys.path:
+            sys.path.insert(0, service_dir)
+        
+        from graphe_xgboost_parameters import generate_all_graphs as gen_graphs
+        
+        result = gen_graphs()
+        
+        if result.get("status") == "success":
+            graphs_count = len(result.get('graphs', {}))
+            return {
+                "status": "success",
+                "message": f"{graphs_count} graphiques générés avec succès",
+                "graphs": result.get("graphs", {})
+            }
+        else:
+            return {
+                "status": "error", 
+                "message": result.get("message", "Erreur inconnue lors de la génération")
+            }
+            
+    except ImportError as e:
+        import traceback
+        print(f"Erreur d'import: {traceback.format_exc()}", file=sys.stderr)
+        return {
+            "status": "error", 
+            "message": f"Module graphe_xgboost_parameters introuvable: {str(e)}"
+        }
+    except Exception as e:
+        import traceback
+        print(f"Erreur génération graphiques: {traceback.format_exc()}", file=sys.stderr)
+        return {
+            "status": "error", 
+            "message": f"Erreur: {str(e)}"
+        }
+
+# =========================
+# GENERATE ALL GRAPHS (direct call)
+# =========================
+@app.post("/generate/all-graphs")
+def generate_all_graphs_endpoint():
+    """
+    Lance la génération de tous les graphiques d'analyse (appel direct).
+    """
+    try:
+        service_dir = os.path.join(os.path.dirname(__file__), "service")
+        if service_dir not in sys.path:
+            sys.path.insert(0, service_dir)
+        
+        from graphe_xgboost_parameters import generate_all_graphs as gen_graphs
+        
+        result = gen_graphs()
+        return result
+    except Exception as e:
+        import traceback
+        print(f"Erreur generate_all_graphs: {traceback.format_exc()}", file=sys.stderr)
+        return {"status": "error", "message": str(e)}
+
+# =========================
+# ENDPOINT POUR LISTER LES IMAGES
+# =========================
+@app.get("/get-images-list")
+def get_images_list():
+    """
+    Retourne la liste des images disponibles dans analysis_exports
+    """
+    try:
+        if not os.path.exists(EXPORT_DIR):
+            return {"status": "success", "images": []}
+        
+        images = []
+        image_files = glob.glob(os.path.join(EXPORT_DIR, "*.png"))
+        
+        # Trier par date de modification (plus récent en premier)
+        image_files.sort(key=os.path.getmtime, reverse=True)
+        
+        for filepath in image_files[:12]:  # Limiter à 12 images max
+            filename = os.path.basename(filepath)
+            
+            # Déterminer le type d'image
+            img_type = "graph"
+            if "arbre" in filename.lower():
+                img_type = "tree"
+            elif "correlation" in filename.lower():
+                img_type = "correlation"
+            elif "learning_curve" in filename.lower():
+                img_type = "learning_curve"
+            elif "residus" in filename.lower():
+                img_type = "residus"
+            elif "partial_dependence" in filename.lower():
+                img_type = "feature_importance"
+            
+            images.append({
+                "type": img_type,
+                "url": f"http://localhost:8000/static/{filename}",
+                "filename": filename
+            })
+        
+        return {"status": "success", "images": images}
+        
+    except Exception as e:
+        return {"status": "error", "images": [], "message": str(e)}
 
 # =========================
 # DOWNLOAD TREE_0.PNG DEPUIS GRAPHE
@@ -64,7 +192,6 @@ def download_graphe_treefinal():
 # =========================
 @app.get("/download/graphe/feature_importance")
 def download_graphe_feature_importance():
-    import glob
     files = glob.glob(os.path.join(GRAPHE_DIR, "feature_importance_*.png"))
     if not files:
         return {"status": "error", "message": "Aucun feature_importance_*.png trouvé dans graphe."}
@@ -76,6 +203,7 @@ def download_graphe_feature_importance():
         filename=os.path.basename(file_path),
         headers={"Content-Disposition": f"attachment; filename={os.path.basename(file_path)}"}
     )
+
 # =========================
 # ENDPOINT POUR SAUVEGARDER LES PARAMÈTRES EN JSON
 # =========================
@@ -96,328 +224,23 @@ async def save_parameters(request: Request):
         raise HTTPException(status_code=500, detail=f"Erreur lors de la sauvegarde: {e}")
     return {"status": "success", "filename": filename}
 
-@app.get("/download/last-parameters-json")
-def download_last_parameters_json():
-    if not os.path.exists(PARAMS_DIR):
-        raise HTTPException(status_code=404, detail="Dossier Donnee_parametres introuvable")
-    json_files = [f for f in os.listdir(PARAMS_DIR) if f.endswith('.json')]
-    if not json_files:
-        raise HTTPException(status_code=404, detail="Aucun fichier JSON trouvé dans Donnee_parametres")
-    json_files.sort(reverse=True)
-    file_path = os.path.join(PARAMS_DIR, json_files[0])
-    return FileResponse(
-        file_path,
-        media_type="application/json",
-        filename=os.path.basename(file_path),
-        headers={"Content-Disposition": f"attachment; filename={os.path.basename(file_path)}"}
-    )
-
-
 # =========================
-# CORS
-# =========================
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# =========================
-# PATHS (DOCKER SAFE)
-# =========================
-BASE_DIR = "/app/service"
-PRED_SCRIPT = os.path.join(BASE_DIR, "predict_from_file.py")
-EXPORT_DIR = os.path.join(BASE_DIR, "analysis_exports")
-
-# Créer le dossier s'il n'existe pas
-os.makedirs(EXPORT_DIR, exist_ok=True)
-
-# =========================
-# STATIC FILES
-# =========================
-app.mount("/static", StaticFiles(directory=EXPORT_DIR), name="static")
-
-# =========================
-# IMAGE TYPES
-# =========================
-IMAGE_TYPES = {
-    "tree": "arbre_",
-    "correlation": "correlation_",
-    "dashboard": "dashboard_",
-    "feature_importance": "feature_importance_"
-}
-
-# =========================
-# GET LATEST IMAGES
-# =========================
-def get_latest_images():
-    if not os.path.exists(EXPORT_DIR):
-        return []
-
-    files = os.listdir(EXPORT_DIR)
-    result = []
-
-    for img_type, prefix in IMAGE_TYPES.items():
-        candidates = [
-            f for f in files
-            if f.startswith(prefix) and f.endswith(".png")
-        ]
-
-        if not candidates:
-            continue
-
-        candidates.sort(reverse=True)
-        latest = candidates[0]
-
-        result.append({
-            "type": img_type,
-            "url": f"http://localhost:8000/static/{latest}",
-            "filename": latest
-        })
-
-    return result
-
-# =========================
-# GET TREE IMAGES
-# =========================
-def get_tree_images():
-    """Récupère les images des arbres XGBoost"""
-    if not os.path.exists(EXPORT_DIR):
-        return []
-
-    tree_images = []
-    
-    # Chercher tous les fichiers tree_
-    all_tree_files = glob.glob(os.path.join(EXPORT_DIR, "tree_*.png"))
-    
-    for filepath in all_tree_files:
-        filename = os.path.basename(filepath)
-        tree_images.append({
-            "type": "tree",
-            "url": f"http://localhost:8000/static/{filename}",
-            "filename": filename
-        })
-    
-    return tree_images
-
-# =========================
-# SIMPLE PREDICTION
-# =========================
-@app.get("/predict/simple")
-def predict_simple(cpu: float, ram: float, visitors: int, plugins: int, growth: float):
-    score = max(0, min(100, 100 - (cpu + ram) / 2 + growth))
-
-    return {
-        "predicted_load": round(score, 2),
-        "xgboost_score": round(score - 5, 2),
-        "saturation_months": max(1, int(36 - growth)),
-        "status": "CRITIQUE" if score > 80 else "SURVEILLANCE" if score > 60 else "OPTIMAL"
-    }
-
-# =========================
-# PREDICT FROM FILE
-# =========================
-# =========================
-# PREDICT FROM FILE
+# ENDPOINT POUR PRÉDICTION DEPUIS FICHIER
 # =========================
 @app.get("/predict/from-file")
-def predict_from_file():
+def predict_from_file_endpoint():
+    """
+    Lance la prédiction à partir du dernier fichier JSON de paramètres sauvegardé.
+    """
     try:
-        # =============================================
-        # 🔥 NETTOYAGE AVANT CHAQUE PRÉDICTION
-        # =============================================
-        print("=" * 50)
-        print("🧹 Nettoyage avant prédiction...")
-        cleanup_json_files()
-        cleanup_images()
-        print("✅ Nettoyage terminé")
-        print("=" * 50)
-
-        # =============================================
-        # PRÉDICTION
-        # =============================================
-        if not os.path.exists(PRED_SCRIPT):
-            # Structure complète même en cas d'erreur
-            return {
-                "status": "error",
-                "output": {
-                    "result": {
-                        'predicted_load': None,
-                        'xgboost_score': None,
-                        'saturation_days': None,
-                        'saturation_months': None,
-                        'saturation_jours': None,
-                        'saturation_text': f"Script introuvable: {PRED_SCRIPT}",
-                        'saturation_months_raw': None,
-                        'status': 'ERREUR',
-                        'recommendation': f'Erreur : Script introuvable: {PRED_SCRIPT}'
-                    },
-                    "images": [],
-                    "trees": [],
-                    "source": None
-                }
-            }
-
-        result = subprocess.run(
-            ["python", PRED_SCRIPT],
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-
-        print("STDOUT:", result.stdout)
-        print("STDERR:", result.stderr)
-
-        try:
-            output_json = json.loads(result.stdout.strip())
-        except json.JSONDecodeError as e:
-            # Structure complète même en cas d'erreur
-            return {
-                "status": "error",
-                "output": {
-                    "result": {
-                        'predicted_load': None,
-                        'xgboost_score': None,
-                        'saturation_days': None,
-                        'saturation_months': None,
-                        'saturation_jours': None,
-                        'saturation_text': f"Erreur parsing JSON: {str(e)}",
-                        'saturation_months_raw': None,
-                        'status': 'ERREUR',
-                        'recommendation': f'Erreur parsing JSON: {str(e)}'
-                    },
-                    "images": [],
-                    "trees": [],
-                    "source": None,
-                    "raw_output": result.stdout,
-                    "stderr": result.stderr
-                }
-            }
-
-        # Extraire correctement le résultat et les images du sous-dictionnaire 'output'
-        output = output_json.get("output", {})
-        prediction_result = output.get("result", {})
-        images = output.get("images", [])
-        trees = output.get("trees", [])
-        source = output.get("source", "")
-
-        return {
-            "status": output_json.get("status", "success"),
-            "output": {
-                "result": prediction_result,
-                "images": images,
-                "trees": trees,
-                "source": source
-            }
-        }
-
-    except subprocess.TimeoutExpired:
-        return {
-            "status": "error",
-            "output": {
-                "result": {
-                    'predicted_load': None,
-                    'xgboost_score': None,
-                    'saturation_days': None,
-                    'saturation_months': None,
-                    'saturation_jours': None,
-                    'saturation_text': "Le script a dépassé le temps limite (60s)",
-                    'saturation_months_raw': None,
-                    'status': 'ERREUR',
-                    'recommendation': 'Erreur : Le script a dépassé le temps limite (60s)'
-                },
-                "images": [],
-                "trees": [],
-                "source": None
-            }
-        }
+        # Import dynamique pour éviter les problèmes de scope
+        service_dir = os.path.join(os.path.dirname(__file__), "service")
+        if service_dir not in sys.path:
+            sys.path.insert(0, service_dir)
+        from predict_from_file import predict_from_json
+        result = predict_from_json()
+        return result
     except Exception as e:
-        return {
-            "status": "error",
-            "output": {
-                "result": {
-                    'predicted_load': None,
-                    'xgboost_score': None,
-                    'saturation_days': None,
-                    'saturation_months': None,
-                    'saturation_jours': None,
-                    'saturation_text': str(e),
-                    'saturation_months_raw': None,
-                    'status': 'ERREUR',
-                    'recommendation': f'Erreur : {e}'
-                },
-                "images": [],
-                "trees": [],
-                "source": None
-            }
-        }
-
-# =========================
-# DOWNLOAD TREE 0
-# =========================
-@app.get("/download/tree0")
-def download_tree0():
-    # Chercher le fichier tree_0 le plus récent
-    tree_files = glob.glob(os.path.join(EXPORT_DIR, "tree_0*.png"))
-    
-    if not tree_files:
-        # Essayer aussi xgboost_tree_0
-        tree_files = glob.glob(os.path.join(EXPORT_DIR, "xgboost_tree_0*.png"))
-    
-    if not tree_files:
-        return {"status": "error", "message": "Tree 0 non trouvé. Lancez une analyse d'abord."}
-    
-    tree_files.sort(reverse=True)
-    file_path = tree_files[0]
-    
-    return FileResponse(
-        file_path,
-        media_type="image/png",
-        filename=os.path.basename(file_path),
-        headers={"Content-Disposition": f"attachment; filename={os.path.basename(file_path)}"}
-    )
-
-# =========================
-# DOWNLOAD TREE FINAL
-# =========================
-@app.get("/download/tree-final")
-def download_tree_final():
-    # Chercher le fichier tree_final le plus récent
-    tree_files = glob.glob(os.path.join(EXPORT_DIR, "tree_final*.png"))
-    
-    if not tree_files:
-        # Essayer aussi xgboost_tree_final
-        tree_files = glob.glob(os.path.join(EXPORT_DIR, "xgboost_tree_final*.png"))
-    
-    if not tree_files:
-        return {"status": "error", "message": "Tree Final non trouvé. Lancez une analyse d'abord."}
-    
-    tree_files.sort(reverse=True)
-    file_path = tree_files[0]
-    
-    return FileResponse(
-        file_path,
-        media_type="image/png",
-        filename=os.path.basename(file_path),
-        headers={"Content-Disposition": f"attachment; filename={os.path.basename(file_path)}"}
-    )
-
-# =========================
-# HEALTH CHECK
-# =========================
-@app.get("/")
-def root():
-    return {
-        "status": "API running",
-        "export_dir": EXPORT_DIR,
-        "export_dir_exists": os.path.exists(EXPORT_DIR),
-        "endpoints": [
-            "/predict/simple",
-            "/predict/from-file",
-            "/download/tree0",
-            "/download/tree-final",
-            "/static/{filename}"
-        ]
-    }
+        import traceback
+        print(f"Erreur predict_from_file: {traceback.format_exc()}", file=sys.stderr)
+        return {"status": "error", "message": str(e)}

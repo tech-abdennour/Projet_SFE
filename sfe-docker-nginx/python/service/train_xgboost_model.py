@@ -342,16 +342,16 @@ except Exception as e:
         f.write(arbres[last_tree])
     print("   ✅ graphe/tree_final.txt")
 
-# --- FEATURE IMPORTANCE (STYLE EXACT IMAGE) ---
-print(f"\n📊 Génération feature_importance.png (style image fournie)...")
 
-# Utiliser les F-Score de référence pour le graphique
-sorted_ref = sorted(REFERENCE_FSCORE.items(), key=lambda x: x[1])
-feature_names_display = [f[0] for f in sorted_ref]
-fscore_values_display = [f[1] for f in sorted_ref]
+# --- FEATURE IMPORTANCE (COHÉRENTE AVEC LE MODÈLE) ---
+print(f"\n📊 Génération feature_importance.png (importances réelles du modèle)...")
 
+# Utiliser les importances réelles du modèle XGBoost
+fscore_real = dict(zip(feature_cols, model.feature_importances_))
+sorted_real = sorted(fscore_real.items(), key=lambda x: x[1])
+feature_names_display = [f[0] for f in sorted_real]
+fscore_values_display = [f[1] for f in sorted_real]
 
-# Création du graphique avec dégradé de couleurs (vert -> jaune -> orange -> rouge)
 import matplotlib.colors as mcolors
 from matplotlib import cm
 
@@ -360,8 +360,6 @@ fig.patch.set_facecolor('white')
 
 n_feat = len(feature_names_display)
 y_positions = np.arange(n_feat)
-
-# Dégradé de couleurs (du vert foncé au rouge/orange)
 colors = [cm.get_cmap('RdYlGn_r')(i/(n_feat-1)) for i in range(n_feat)]
 
 bars = ax.barh(
@@ -388,21 +386,14 @@ for i, (bar, val) in enumerate(zip(bars, fscore_values_display)):
         fontfamily='monospace'
     )
 
-# Axe Y
 ax.set_yticks(y_positions)
 ax.set_yticklabels(feature_names_display, fontsize=8, color='#444444')
-
-# Axe X
 max_val = max(fscore_values_display)
 ax.set_xlim(0, max_val * 1.20)
 ax.set_xlabel('Importance (F-score)', fontsize=10, fontweight='bold', color=TITLE_COLOR, labelpad=8)
 ax.xaxis.set_major_locator(ticker.MaxNLocator(8))
 ax.tick_params(axis='x', labelsize=7.5, colors='#555555')
-
-# Titre (style image)
 ax.set_title('Feature Importance (F-score)', fontsize=12, fontweight='bold', color=TITLE_COLOR, pad=12)
-
-# Ligne moyenne (rouge)
 mean_fscore = np.mean(fscore_values_display)
 ax.axvline(
     x=mean_fscore,
@@ -412,15 +403,9 @@ ax.axvline(
     alpha=0.5,
     label=f'Moyenne: {mean_fscore:.3f}'
 )
-
-# Légende
 ax.legend(fontsize=7.5, loc='lower right', framealpha=0.9, edgecolor='#CCCCCC', facecolor='white')
-
-# Grille subtile
 ax.grid(True, alpha=0.2, axis='x', color=GRID_COLOR, linestyle='-', linewidth=0.4)
 ax.set_axisbelow(True)
-
-# Bordures épurées
 ax.spines['top'].set_visible(False)
 ax.spines['right'].set_visible(False)
 ax.spines['left'].set_color('#CCCCCC')
@@ -435,6 +420,15 @@ plt.close()
 print(f"   ✅ {feat_path}")
 
 # ============================================================
+# SAUVEGARDE DES MÉTRIQUES DANS UN FICHIER JSON
+# ============================================================
+import json
+metrics_path = 'data/model_metrics_all.json'
+with open(metrics_path, 'w') as f:
+    json.dump({'rmse': rmse, 'mae': mae, 'r2': r2}, f, indent=2)
+print(f"✅ {metrics_path}")
+
+# ============================================================
 # RÉSUMÉ FINAL
 # ============================================================
 print(f"\n{'='*70}")
@@ -447,6 +441,7 @@ print(f"""
 ├── graphe/tree_0.png              (50×200 pouces, arbre COMPLET)
 ├── graphe/tree_final.png          (50×200 pouces, arbre COMPLET)
 └── graphe/feature_importance_{TIMESTAMP}.png
+|__ data/model_metrics_all.json
 
 📊 Performances:
 ├── RMSE : {rmse:.4f}
