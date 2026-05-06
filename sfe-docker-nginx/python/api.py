@@ -1,4 +1,5 @@
 
+
 import sys
 import os
 import json
@@ -15,11 +16,66 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'script'))
 
 
 
+
+# =========================
+# PATHS (DOCKER SAFE)
+# =========================
+BASE_DIR = "/app/service"
+PARAMS_DIR = "/app/Donnee_parametres"
+GRAPHE_DIR = os.path.join(BASE_DIR, "graphe")
+
 # =========================
 # DOWNLOAD LATEST JSON PARAMETER FILE
 # =========================
 app = FastAPI()
-PARAMS_DIR = "/app/Donnee_parametres"
+
+# =========================
+# DOWNLOAD TREE_0.PNG DEPUIS GRAPHE
+# =========================
+@app.get("/download/graphe/tree0")
+def download_graphe_tree0():
+    file_path = os.path.join(GRAPHE_DIR, "tree_0.png")
+    if not os.path.exists(file_path):
+        return {"status": "error", "message": "tree_0.png non trouvé dans graphe."}
+    return FileResponse(
+        file_path,
+        media_type="image/png",
+        filename="tree_0.png",
+        headers={"Content-Disposition": "attachment; filename=tree_0.png"}
+    )
+
+# =========================
+# DOWNLOAD TREE_FINAL.PNG DEPUIS GRAPHE
+# =========================
+@app.get("/download/graphe/treefinal")
+def download_graphe_treefinal():
+    file_path = os.path.join(GRAPHE_DIR, "tree_final.png")
+    if not os.path.exists(file_path):
+        return {"status": "error", "message": "tree_final.png non trouvé dans graphe."}
+    return FileResponse(
+        file_path,
+        media_type="image/png",
+        filename="tree_final.png",
+        headers={"Content-Disposition": "attachment; filename=tree_final.png"}
+    )
+
+# =========================
+# DOWNLOAD FEATURE IMPORTANCE PNG DEPUIS GRAPHE
+# =========================
+@app.get("/download/graphe/feature_importance")
+def download_graphe_feature_importance():
+    import glob
+    files = glob.glob(os.path.join(GRAPHE_DIR, "feature_importance_*.png"))
+    if not files:
+        return {"status": "error", "message": "Aucun feature_importance_*.png trouvé dans graphe."}
+    files.sort(reverse=True)
+    file_path = files[0]
+    return FileResponse(
+        file_path,
+        media_type="image/png",
+        filename=os.path.basename(file_path),
+        headers={"Content-Disposition": f"attachment; filename={os.path.basename(file_path)}"}
+    )
 # =========================
 # ENDPOINT POUR SAUVEGARDER LES PARAMÈTRES EN JSON
 # =========================
@@ -178,12 +234,31 @@ def predict_from_file():
         cleanup_images()
         print("✅ Nettoyage terminé")
         print("=" * 50)
-        
+
         # =============================================
         # PRÉDICTION
         # =============================================
         if not os.path.exists(PRED_SCRIPT):
-            return {"status": "error", "message": f"Script introuvable: {PRED_SCRIPT}"}
+            # Structure complète même en cas d'erreur
+            return {
+                "status": "error",
+                "output": {
+                    "result": {
+                        'predicted_load': None,
+                        'xgboost_score': None,
+                        'saturation_days': None,
+                        'saturation_months': None,
+                        'saturation_jours': None,
+                        'saturation_text': f"Script introuvable: {PRED_SCRIPT}",
+                        'saturation_months_raw': None,
+                        'status': 'ERREUR',
+                        'recommendation': f'Erreur : Script introuvable: {PRED_SCRIPT}'
+                    },
+                    "images": [],
+                    "trees": [],
+                    "source": None
+                }
+            }
 
         result = subprocess.run(
             ["python", PRED_SCRIPT],
@@ -198,11 +273,27 @@ def predict_from_file():
         try:
             output_json = json.loads(result.stdout.strip())
         except json.JSONDecodeError as e:
+            # Structure complète même en cas d'erreur
             return {
                 "status": "error",
-                "message": f"Erreur parsing JSON: {str(e)}",
-                "raw_output": result.stdout,
-                "stderr": result.stderr
+                "output": {
+                    "result": {
+                        'predicted_load': None,
+                        'xgboost_score': None,
+                        'saturation_days': None,
+                        'saturation_months': None,
+                        'saturation_jours': None,
+                        'saturation_text': f"Erreur parsing JSON: {str(e)}",
+                        'saturation_months_raw': None,
+                        'status': 'ERREUR',
+                        'recommendation': f'Erreur parsing JSON: {str(e)}'
+                    },
+                    "images": [],
+                    "trees": [],
+                    "source": None,
+                    "raw_output": result.stdout,
+                    "stderr": result.stderr
+                }
             }
 
         # Extraire correctement le résultat et les images du sous-dictionnaire 'output'
@@ -213,7 +304,7 @@ def predict_from_file():
         source = output.get("source", "")
 
         return {
-            "status": "success",
+            "status": output_json.get("status", "success"),
             "output": {
                 "result": prediction_result,
                 "images": images,
@@ -223,9 +314,45 @@ def predict_from_file():
         }
 
     except subprocess.TimeoutExpired:
-        return {"status": "error", "message": "Le script a dépassé le temps limite (60s)"}
+        return {
+            "status": "error",
+            "output": {
+                "result": {
+                    'predicted_load': None,
+                    'xgboost_score': None,
+                    'saturation_days': None,
+                    'saturation_months': None,
+                    'saturation_jours': None,
+                    'saturation_text': "Le script a dépassé le temps limite (60s)",
+                    'saturation_months_raw': None,
+                    'status': 'ERREUR',
+                    'recommendation': 'Erreur : Le script a dépassé le temps limite (60s)'
+                },
+                "images": [],
+                "trees": [],
+                "source": None
+            }
+        }
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {
+            "status": "error",
+            "output": {
+                "result": {
+                    'predicted_load': None,
+                    'xgboost_score': None,
+                    'saturation_days': None,
+                    'saturation_months': None,
+                    'saturation_jours': None,
+                    'saturation_text': str(e),
+                    'saturation_months_raw': None,
+                    'status': 'ERREUR',
+                    'recommendation': f'Erreur : {e}'
+                },
+                "images": [],
+                "trees": [],
+                "source": None
+            }
+        }
 
 # =========================
 # DOWNLOAD TREE 0

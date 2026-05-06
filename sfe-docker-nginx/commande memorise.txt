@@ -11,7 +11,7 @@ ________________________________________________________________________________
 ______________________________________________________________________________________________________________________________________________
 2. Entrer dans les terminaux (Le plus utile pour toi)
 Si tu veux taper des commandes à l'intérieur de tes machines :
-•	Entrer dans Python : docker exec -it python_service bash
+•	Entrer dans Python : docker exec -it python_api bash
 •	Entrer dans PHP : docker exec -it php_fpm bash
 •	Entrer dans la base de données : docker exec -it mariadb_db mariadb -u root -p
 _____________________________________________________________________________________________________________________________________________

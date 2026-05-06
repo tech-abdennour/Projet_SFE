@@ -19,10 +19,9 @@ PARAMS_DIR = "/app/Donnee_parametres"
 EXPORTS_DIR = "/app/service/analysis_exports"
 
 # Types d'images à vérifier
-IMAGE_TYPES = ["dashboard_", "correlation_", "feature_importance_", "arbre_"]
+IMAGE_TYPES = [ "correlation_", "correlation", "arbre_","learning_curve_", "residus" ]
 
 # Fichiers protégés (jamais supprimés)
-PROTECTED_PREFIXES = ["tree_0", "tree_final"]
 
 def log(message):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

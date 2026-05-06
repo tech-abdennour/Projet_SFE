@@ -539,41 +539,30 @@ label {
 /* ----- IMAGES ----- */
 .images-grid {
     display: grid;
-    /* Crée exactement 2 colonnes de taille égale */
-    grid-template-columns: repeat(2, 1fr); 
-    gap: 20px; /* Espace entre les images */
-    margin-top: 15px;
-}
-
-/* On s'assure que les images ne dépassent pas de leur colonne */
-.images-grid img {
-    width: 100%;
-    height: auto;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--gray-200);
-    display: block;
-}
-
-/* Optionnel : Responsive (1 seule image par ligne sur mobile) */
-@media (max-width: 768px) {
-    .images-grid {
-        grid-template-columns: 1fr;
-    }
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
 }
 .image-card {
     background: #fff;
-    border-radius: var(--radius-lg);
-    padding: 16px;
-    box-shadow: var(--shadow);
-    text-align: center;
-    transition: var(--transition-slow);
-    border: 1px solid var(--gray-200);
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+    padding: 18px 18px 10px 18px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transition: box-shadow 0.2s;
 }
-
-.image-card:hover { box-shadow: var(--shadow-lg); transform: translateY(-3px); }
-.image-card img { width: 100%; border-radius: var(--radius); cursor: pointer; transition: var(--transition); }
-.image-card h4 { font-size: 15px; font-weight: 600; color: var(--gray-800); margin-bottom: 12px; }
-.image-name { font-size: 11px; color: var(--gray-400); margin-top: 8px; word-break: break-all; }
+.image-card img {
+    max-width: 100%;
+    max-height: 260px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+}
+.image-card-large {
+    grid-column: span 2;
+}
 
 /* ----- TREE LINKS ----- */
 .tree-links { display: flex; gap: 12px; flex-wrap: wrap; }

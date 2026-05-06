@@ -515,6 +515,15 @@ function validateParams(params) {
 }
 
 
+// Utilitaire pour log détaillé succès/échec dans la console navigateur
+function logOperation(context, res, isSuccess) {
+    if (isSuccess) {
+        console.log(`%c[SUCCESS][${context}]`, 'color:green;font-weight:bold;', res && res.message ? res.message : 'Succès', '\nRéponse complète:', res);
+    } else {
+        console.error(`%c[ECHEC][${context}]`, 'color:red;font-weight:bold;', (res && (res.error || res.message)) ? (res.error || res.message) : 'Erreur', '\nRéponse complète:', res);
+    }
+}
+
 // Nouvelle fonction pour sauvegarder les paramètres dans l'API Python
 function saveParamsToPythonAPI(params) {
     return fetch("http://localhost:8000/save-parameters", {
@@ -524,6 +533,7 @@ function saveParamsToPythonAPI(params) {
     })
     .then(function(r) { return r.json(); })
     .then(function(res) {
+        logOperation('SaveParamsToPythonAPI', res, res.status === "success");
         if (res.status === "success") {
             showToast("Paramètres sauvegardés dans Donnee_parametres !");
         } else {
@@ -531,7 +541,8 @@ function saveParamsToPythonAPI(params) {
         }
         return res.status === "success";
     })
-    .catch(function() {
+    .catch(function(e) {
+        logOperation('SaveParamsToPythonAPI', e, false);
         showToast("Erreur API Python", true);
         return false;
     });
@@ -541,13 +552,14 @@ function displayImages(images) {
     var container = document.getElementById('imagesContainer');
     var display = document.getElementById('imagesDisplay');
     if (!images || !images.length) { container.style.display = 'none'; return; }
-    var names = { tree: 'Arbre de décision', correlation: 'Matrice de corrélation', dashboard: 'Dashboard', feature_importance: 'Importance des caractéristiques' };
+    var names = { tree: 'Arbre de décision', correlation: 'Matrice de corrélation', dashboard: 'Dashboard', feature_importance: 'Importance des caractéristiques', residus: 'Résidus', shap: 'SHAP', learning_curve: 'Courbe d\'apprentissage' };
     var html = '';
     for (var i = 0; i < images.length; i++) {
         var img = images[i];
-        // Correction : toujours préfixer par http://localhost:8000 si ce n'est pas déjà un lien complet
         var imgUrl = img.url.startsWith('http') ? img.url : ('http://localhost:8000' + img.url);
-        html += '<div class="image-card"><h4>' + (names[img.type] || img.type) + '</h4><img src="' + imgUrl + '" onclick="window.open(\'' + imgUrl + '\',\'_blank\')"><p class="image-name">' + imgUrl.split('/').pop() + '</p></div>';
+        var cardClass = 'image-card';
+        if (img.type === 'learning_curve') cardClass += ' image-card-large';
+        html += '<div class="' + cardClass + '"><h4>' + (names[img.type] || img.type) + '</h4><img src="' + imgUrl + '" onclick="window.open(\'' + imgUrl + '\',\'_blank\')"><p class="image-name">' + imgUrl.split('/').pop() + '</p></div>';
     }
     display.innerHTML = html;
     container.style.display = 'block';
@@ -576,21 +588,37 @@ function runAnalysis() {
         .then(function(r) { return r.json(); })
         .then(function(res) {
             document.getElementById('loadingResults').style.display = 'none';
+            logOperation('Prédiction', res, res.status === "success");
             if (res.status === "success") {
                 currentPrediction = res.output.result;
                 displayResults(res.output.result);
                 displayImages(res.output.images);
                 document.getElementById('resultsContainer').style.display = 'block';
                 showToast('Prédiction terminée !');
-                // Stocker le résultat dans sessionStorage pour accès depuis Sauvegardes
                 sessionStorage.setItem('lastPrediction', JSON.stringify(currentPrediction));
             } else {
-                showToast('Erreur API', true);
+                // Chercher un message d'erreur détaillé dans output.result
+                let errMsg = 'Erreur inconnue';
+                if (res.output && res.output.result) {
+                    if (res.output.result.saturation_text && res.output.result.saturation_text !== 'None') {
+                        errMsg = res.output.result.saturation_text;
+                    } else if (res.output.result.recommendation && res.output.result.recommendation !== 'None') {
+                        errMsg = res.output.result.recommendation;
+                    } else {
+                        errMsg = JSON.stringify(res.output.result, null, 2);
+                    }
+                } else if (res.message) {
+                    errMsg = res.message;
+                } else {
+                    errMsg = JSON.stringify(res, null, 2);
+                }
+                showToast(errMsg, true);
                 document.getElementById('noResults').style.display = 'block';
             }
         })
-        .catch(function() {
+        .catch(function(e) {
             document.getElementById('loadingResults').style.display = 'none';
+            logOperation('Prédiction', e, false);
             showToast('API indisponible', true);
         });
     });
@@ -599,7 +627,7 @@ function runAnalysis() {
 function saveCurrentResult() {
     if (!currentPrediction) { showToast('Aucun résultat', true); return; }
     var btn = document.getElementById('saveResultBtn');
-    btn.disabled = true; btn.innerHTML = 'Sauvegarder...';
+        btn.disabled = true; btn.innerHTML = 'Sauvegarder en cours...';
     // Récupérer les paramètres du formulaire
     var params = getFormParams();
     // Fusionner les paramètres et le résultat de l'API
@@ -610,33 +638,35 @@ function saveCurrentResult() {
         body: JSON.stringify(dataToSave)
     })
     .then(function(r) { return r.json(); })
-    .then(function(res) { 
+    .then(function(res) {
+        logOperation('Sauvegarde', res, res.success);
         if (res.success) {
-            showToast('Analyse sauvegardée !');
-            console.log('SAUVEGARDE REUSSIE');
-            setTimeout(function() { location.reload(); }, 1500);
+            showToast(res.message ? res.message : 'Analyse sauvegardée !');
         } else {
-            showToast('Erreur', true);
+            showToast(res.error ? res.error : 'Erreur', true);
             btn.disabled = false;
             btn.innerHTML = 'Sauvegarder dans l\'historique';
-            if (res.error) {
-                console.log('SAUVEGARDE ECHOUEE :', res.error);
-            } else {
-                console.log('SAUVEGARDE ECHOUEE : Erreur inconnue', res);
-            }
         }
+        setTimeout(function() { location.reload(); }, 1500);
     });
 }
 
 function saveAsJson() {
     if (!currentPrediction) { showToast('Aucun résultat', true); return; }
     var btn = document.getElementById('saveJsonBtn');
-    btn.disabled = true; btn.innerHTML = 'Sauvegarde JSON...';
+        btn.disabled = true; btn.innerHTML = 'Sauvegarde JSON en cours...';
     fetch(window.location.href, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify({ action: 'save_json', result_data: currentPrediction }) })
     .then(function(r) { return r.json(); })
     .then(function(res) { 
-        if (res.success) { showToast('Sauvegarde JSON effectuée !'); setTimeout(function() { location.reload(); }, 1500); }
-        else { showToast('Erreur', true); btn.disabled = false; btn.innerHTML = 'Sauvegarde JSON (sans images)'; }
+        logOperation('Sauvegarde JSON', res, res.success);
+        if (res.success) {
+            showToast(res.message ? res.message : 'Sauvegarde JSON effectuée !');
+        } else {
+            showToast(res.error ? res.error : 'Erreur', true);
+            btn.disabled = false;
+            btn.innerHTML = 'Sauvegarde JSON (sans images)';
+        }
+        setTimeout(function() { location.reload(); }, 1500);
     });
 }
 
@@ -650,7 +680,15 @@ function ajaxAction(action, id) {
     if (id) body[action + '_id'] = id;
     fetch(window.location.href, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify(body) })
     .then(function(r) { return r.json(); })
-    .then(function(res) { if (res.success) { showToast('Terminé'); setTimeout(function() { location.reload(); }, 1000); } });
+    .then(function(res) {
+        logOperation('Opération', res, res.success);
+        if (res.success) {
+            showToast(res.message ? res.message : 'Terminé');
+        } else {
+            showToast(res.error ? res.error : 'Erreur', true);
+        }
+        setTimeout(function() { location.reload(); }, 1000);
+    });
 }
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -664,6 +702,13 @@ document.addEventListener('DOMContentLoaded', function() {
     var validTabs = ['dashboard', 'resultats', 'sauvegardes', 'historique', 'corbeille'];
     if (validTabs.indexOf(tab) === -1) tab = 'dashboard';
     showTab(tab);
+
+    // Ajout : log sur tous les boutons
+    document.querySelectorAll('button').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            console.log('%c[BOUTON] Clic sur : ' + (btn.innerText || btn.id || btn.className), 'color:#2563eb;font-weight:bold;', btn);
+        });
+    });
 });
 </script>
 </head>
@@ -733,7 +778,11 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="card"><h3>📊 Scores de Performance</h3><div id="scoresDisplay"></div></div>
             <div class="card"><h3>💡 Recommandation</h3><div id="recommendationDisplay"></div></div>
             <div class="card" id="imagesContainer" style="display:none;"><h3>🖼️ Graphiques d'analyse</h3><div class="images-grid" id="imagesDisplay"></div></div>
-            <div class="card" id="treeDownloads"><h3>🌳 Téléchargement des arbres XGBoost</h3><div class="tree-links"><a href="http://localhost:8000/download/tree0" class="tree-link" download>📥 Tree 0</a><a href="http://localhost:8000/download/tree-final" class="tree-link" download>📥 Tree Final</a></div></div>
+            <div class="card" id="treeDownloads"><h3>🌳 Téléchargement des arbres XGBoost</h3><div class="tree-links">
+                <a href="http://localhost:8000/download/graphe/tree0" class="tree-link" download>📥 Tree 0</a>
+                <a href="http://localhost:8000/download/graphe/treefinal" class="tree-link" download>📥 Tree Final</a>
+                <a href="http://localhost:8000/download/graphe/feature_importance" class="tree-link" download>📥 Feature Importance</a>
+            </div></div>
         </div>
     </div>
 
