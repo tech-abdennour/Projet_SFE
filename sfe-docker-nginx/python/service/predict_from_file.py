@@ -291,9 +291,27 @@ def predict(model: Any, feature_columns: list[str], params: dict[str, Any]) -> d
 
     capacity_margin = round(max(0.0, 100.0 - predicted_load), 2)
 
+    # Récupérer le vrai score R² du modèle depuis le model.pkl si disponible
+    r2_score_model = None
+    # 1. Si model est un dict (cas normal)
+    if isinstance(model, dict) and 'performance_metrics' in model:
+        r2_score_model = model['performance_metrics'].get('r2', None)
+    # 2. Si metadata contient performance_metrics
+    if (r2_score_model is None) and isinstance(feature_columns, dict) and 'performance_metrics' in feature_columns:
+        r2_score_model = feature_columns['performance_metrics'].get('r2', None)
+    # 3. Si metadata (du model.pkl) contient performance_metrics
+    if r2_score_model is None and 'metadata' in locals():
+        metadata_obj = locals().get('metadata', None)
+        if isinstance(metadata_obj, dict) and 'performance_metrics' in metadata_obj:
+            r2_score_model = metadata_obj['performance_metrics'].get('r2', None)
+    # 4. Si model a un attribut performance_metrics (rare)
+    if r2_score_model is None and hasattr(model, 'performance_metrics'):
+        pm = getattr(model, 'performance_metrics', None)
+        if isinstance(pm, dict):
+            r2_score_model = pm.get('r2', None)
     return {
         "predicted_load": predicted_load,
-        "xgboost_score": predicted_load,
+        "xgboost_score": r2_score_model,
         "recommended_capacity_score": predicted_load,
         "capacity_margin": capacity_margin,
         "saturation_days": round(float(saturation_days), 2),

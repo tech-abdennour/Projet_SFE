@@ -1,13 +1,20 @@
 {
-  "timestamp": "20260509_032212",
+  "timestamp": "20260509_162526",
   "samples": 100000,
   "target_column": "recommended_capacity_score",
-  "rmse": 1.938404,
-  "mse": 3.757411,
-  "mae": 1.553169,
-  "r2": 0.975843,
-  "accuracy": 96.87,
-  "train_time_seconds": 19.8992,
+  "charge_generation": "dynamic_non_linear",
+  "performance": {
+    "rmse": 9.529375855625341,
+    "mse": 90.80900419777521,
+    "mae": 7.320864117956392,
+    "r2": 0.824287181962917,
+    "accuracy": "86.48%"
+  },
+  "train_info": {
+    "train_time_seconds": 20.0991,
+    "test_samples": 20000,
+    "train_samples": 80000
+  },
   "impact_reference": {
     "visitors_per_day": {
       "rank": 1,
@@ -112,11 +119,13 @@
   },
   "files_generated": {
     "dataset": "/app/service/data/training_dataset.csv",
-    "model": "/app/service/models/model.pkl",
+    "model_pkl": "/app/service/models/model.pkl",
     "tree_0": "/app/service/graphe/tree_0.png",
     "tree_final": "/app/service/graphe/tree_final.png",
-    "feature_importance": "/app/service/graphe/feature_importance_20260509_032212.png",
-    "metrics": "/app/service/data/model_metrics_all.json",
-    "learning_curve": "/app/service/graphe/learning_curve_20260509_032212.png"
+    "feature_importance": "/app/service/graphe/feature_importance_20260509_162526.png",
+    "residuals": "/app/service/graphe/residus_20260509_162526.png",
+    "correlation": "/app/service/graphe/correlation_20260509_162526.png",
+    "learning_curve": "/app/service/graphe/learning_curve_20260509_162526.png",
+    "metrics_json": "/app/service/models/model_metrics_all.json"
   }
 }

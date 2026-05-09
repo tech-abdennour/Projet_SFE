@@ -460,7 +460,12 @@ if (!in_array($active_tab, $valid_tabs)) {
                         <td class="td-growth"><?php echo $pred['traffic_growth_rate']; ?>%</td>
                         <td class="td-usage"><?php echo $pred['cpu_usage_avg']; ?>% / <?php echo $pred['ram_usage_avg']; ?>%</td>
                         <td class="td-number"><?php echo $pred['plugin_count']; ?></td>
-                        <td class="td-score"><?php echo $pred['xgboost_score']; ?>%</td>
+                                                <td class="td-score">
+                                                    <?php
+                                                        $r2 = $pred['xgboost_score'];
+                                                        echo (is_numeric($r2) && $r2 !== null) ? number_format((float)$r2, 4) : 'N/A';
+                                                    ?>
+                                                </td>
                         <td class="td-number"><?php echo $pred['predicted_load']; ?>%</td>
                         <td><span class="badge-status <?php echo $pred['status'] == 'CRITIQUE' ? 'badge-critical' : ($pred['status'] == 'SURVEILLANCE' ? 'badge-warning' : 'badge-optimal'); ?>"><?php echo $pred['status']; ?></span></td>
                         <td><button class="btn-icon btn-archive" onclick="archiverAnalyse('<?php echo $pred['id']; ?>')" title="Archiver">📦</button></td>
@@ -484,7 +489,12 @@ if (!in_array($active_tab, $valid_tabs)) {
                         <td class="td-growth"><?php echo $del['traffic_growth_rate']; ?>%</td>
                         <td class="td-usage"><?php echo $del['cpu_usage_avg']; ?>% / <?php echo $del['ram_usage_avg']; ?>%</td>
                         <td class="td-number"><?php echo $del['plugin_count']; ?></td>
-                        <td class="td-score"><?php echo $del['xgboost_score']; ?>%</td>
+                                                <td class="td-score">
+                                                    <?php
+                                                        $r2 = $del['xgboost_score'];
+                                                        echo (is_numeric($r2) && $r2 !== null) ? number_format((float)$r2, 4) : 'N/A';
+                                                    ?>
+                                                </td>
                         <td class="td-number"><?php echo $del['predicted_load']; ?>%</td>
                         <td><span class="badge-deleted">🗑️ Supprimé</span></td>
                         <td><button class="btn-icon btn-restore" onclick="restaurerAnalyse('<?php echo $del['id']; ?>')" title="Restaurer">🔄</button><button class="btn-icon btn-delete-forever" onclick="supprimerDefinitivement('<?php echo $del['id']; ?>')" title="Supprimer">❌</button></td>
@@ -647,6 +657,7 @@ function resetCurrentAnalysis() {
     var btn = document.getElementById('resetBtn');
     btn.disabled = true; btn.innerHTML = '⏳ Réinitialisation...'; btn.style.opacity = '0.7';
     viderTousLesChamps();
+    localStorage.removeItem('lastPrediction');
     sessionStorage.removeItem('lastPrediction');
     sessionStorage.removeItem('lastFormParams');
     currentPrediction = null;
@@ -682,7 +693,11 @@ function displayResults(data) {
     if (data.predicted_saturation_months == 0) sat = 'SATURÉ';
     var cls = data.status === 'CRITIQUE' ? 'critical' : (data.status === 'SURVEILLANCE' ? 'warning' : 'optimal');
     var col = data.status === 'CRITIQUE' ? '#dc2626' : (data.status === 'SURVEILLANCE' ? '#d97706' : '#10b981');
-    document.getElementById('scoresDisplay').innerHTML = '<div class="scores-grid"><div class="score-item"><div class="score-label">Score XGBoost</div><div class="score-value">' + data.xgboost_score + '%</div><div class="gauge"><div class="gauge-fill ' + cls + '" style="width:' + data.xgboost_score + '%"></div></div></div><div class="score-item"><div class="score-label">Charge prédite</div><div class="score-value" style="color:' + col + '">' + data.predicted_load + '%</div><div class="gauge"><div class="gauge-fill ' + cls + '" style="width:' + data.predicted_load + '%"></div></div></div><div class="score-item"><div class="score-label">Saturation</div><div class="score-value saturation">' + sat + '</div><span class="badge-status badge-' + cls + '">' + data.status + '</span></div></div>';
+    document.getElementById('scoresDisplay').innerHTML = '<div class="scores-grid">'
+        + '<div class="score-item"><div class="score-label">Charge prédite</div><div class="score-value" style="color:' + col + '">' + data.predicted_load + '%</div><div class="gauge"><div class="gauge-fill ' + cls + '" style="width:' + data.predicted_load + '%"></div></div></div>'
+        + '<div class="score-item"><div class="score-label">Marge de capacité restante</div><div class="score-value" style="color:#10b981">' + data.capacity_margin + '%</div><div class="gauge" style="margin-top:10px;"><div class="gauge-fill optimal" style="width:' + data.capacity_margin + '%;background:#10b981;"></div></div></div>'
+        + '<div class="score-item"><div class="score-label">Saturation</div><div class="score-value saturation">' + sat + '</div><span class="badge-status badge-' + cls + '">' + data.status + '</span></div>'
+        + '</div>';
     document.getElementById('recommendationDisplay').innerHTML = '<div class="recommendation-text">' + (data.recommendation || 'Aucune recommandation.') + '</div>';
 }
 
@@ -694,7 +709,7 @@ function runAnalysis() {
     document.getElementById('resultsContainer').style.display = 'none';
     document.getElementById('loadingResults').style.display = 'block';
     showTab('resultats');
-    fetch("http://localhost:8000/save-and-predict-json", {
+    fetch("http://localhost:8000/api/save-and-predict-json", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(params)
@@ -708,7 +723,7 @@ function runAnalysis() {
             document.getElementById('resultsContainer').style.display = 'block';
             document.getElementById('noResults').style.display = 'none';
             showToast('Prédiction terminée !');
-            sessionStorage.setItem('lastPrediction', JSON.stringify(currentPrediction));
+            localStorage.setItem('lastPrediction', JSON.stringify(currentPrediction));
         } else {
             showToast('Erreur de prédiction', true);
             document.getElementById('resultsContainer').style.display = 'block';
@@ -836,11 +851,10 @@ function ajaxAction(action, id) {
 document.addEventListener('DOMContentLoaded', function() {
     restoreFormParamsFromStorage();
     
-    var last = sessionStorage.getItem('lastPrediction');
+    var last = localStorage.getItem('lastPrediction') || sessionStorage.getItem('lastPrediction');
     if (last) {
         try { currentPrediction = JSON.parse(last); } catch(e) { currentPrediction = null; }
     }
-    
     if (currentPrediction) {
         document.getElementById('noResults').style.display = 'none';
         document.getElementById('resultsContainer').style.display = 'block';
