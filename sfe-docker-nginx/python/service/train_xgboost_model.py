@@ -1,450 +1,517 @@
-# Utilitaire pour ajouter un titre à un graphviz.Source
-def add_title_to_source(source_obj, title):
-    lines = source_obj.source.splitlines()
-    # Ajoute le label juste après la première ligne (qui est 'digraph Tree {')
-    lines.insert(1, f'label="{title}"; labelloc=top; fontsize=24;')
-    new_source = '\n'.join(lines)
-    import graphviz
-    return graphviz.Source(new_source)
+from __future__ import annotations
 
-#!/usr/bin/env python3
-"""
-vala_bleu_complete.py - Script COMPLET VALA BLEU
-Génère TOUT avec le style EXACT de l'image feature_importance_20260505_140251.png
-"""
-
-import numpy as np
-import pandas as pd
-import xgboost as xgb
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
-
-import joblib
-import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-import os
-import warnings
+import json
 import time
 from datetime import datetime
-import graphviz
+from pathlib import Path
 
-warnings.filterwarnings('ignore')
+import joblib
+import matplotlib
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-N_SAMPLES = 10000
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split
+from xgboost import XGBRegressor, plot_importance, plot_tree
+
+
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
+MODELS_DIR = BASE_DIR / "models"
+GRAPHE_DIR = BASE_DIR / "graphe"
+
+DATASET_PATH = DATA_DIR / "training_dataset.csv"
+MODEL_PATH = MODELS_DIR / "model.pkl"
+METRICS_PATH = DATA_DIR / "model_metrics_all.json"
+
 RANDOM_STATE = 42
-DPI = 300
-TIMESTAMP = datetime.now().strftime('%Y%m%d_%H%M%S')
+N_SAMPLES = 100_000
+BAR_COLOR = "#4472C4"
 
-os.makedirs('data', exist_ok=True)
-os.makedirs('models', exist_ok=True)
-os.makedirs('graphe', exist_ok=True)
-
-np.random.seed(RANDOM_STATE)
-
-# ============================================================
-# F-SCORE DE RÉFÉRENCE (image fournie)
-# ============================================================
-REFERENCE_FSCORE = {
-    'wp_factor': 0.129,
-    'visitors_per_day': 0.119,
-    'disk_usage_avg': 0.086,
-    'disk_usage_max': 0.067,
-    'cpu_usage_avg': 0.067,
-    'php_score': 0.066,
-    'ram_usage_avg': 0.061,
-    'cache_enabled': 0.058,
-    'traffic_growth_rate': 0.050,
-    'ram_usage_max': 0.048,
-    'cpu_usage_peak': 0.044,
-    'response_time': 0.036,
-    'total_iops': 0.032,
-    'heavy_plugins_count': 0.031,
-    'plugin_count': 0.027,
-}
-
-# ============================================================
-# COULEUR EXACTE DE L'IMAGE
-# ============================================================
-# L'image utilise un bleu spécifique : #5B9BD5 (bleu moyen/professionnel)
-BAR_COLOR = '#5B9BD5'  # Couleur exacte des barres dans l'image
-TEXT_COLOR = '#333333'  # Texte des valeurs
-TITLE_COLOR = '#2C3E50'
-GRID_COLOR = '#D5D5D5'
-MEAN_LINE_COLOR = '#C0392B'
-
-print("=" * 70)
-print("🔮 VALA BLEU - Génération Complète")
-print("=" * 70)
-print(f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-# ============================================================
-# 1. GÉNÉRATION DES DONNÉES D'ENTRAÎNEMENT
-# ============================================================
-print(f"\n{'='*70}")
-print(f"ÉTAPE 1/5: Génération des données d'entraînement ({N_SAMPLES:,} échantillons)")
-print(f"{'='*70}")
-
-n = N_SAMPLES
-
-data = {
-    'visitors_per_day': np.random.randint(100, 500000, n),
-    'pages_per_day': np.random.randint(500, 2000000, n),
-    'traffic_growth_rate': np.random.uniform(-10, 50, n),
-    'peak_start_hour': np.random.randint(0, 20, n),
-    'peak_end_hour': np.random.randint(21, 24, n),
-    'cpu_usage_avg': np.random.uniform(10, 95, n),
-    'cpu_usage_peak': np.random.uniform(20, 100, n),
-    'ram_usage_avg': np.random.uniform(15, 90, n),
-    'ram_usage_max': np.random.uniform(30, 98, n),
-    'disk_usage_avg': np.random.uniform(20, 95, n),
-    'disk_usage_max': np.random.uniform(30, 100, n),
-    'response_time': np.random.uniform(50, 5000, n),
-    'iops_read': np.random.randint(100, 50000, n),
-    'iops_write': np.random.randint(50, 30000, n),
-    'plugin_count': np.random.randint(5, 100, n),
-    'woocommerce_active': np.random.choice([0, 1], n, p=[0.75, 0.25]),
-    'elementor_active': np.random.choice([0, 1], n, p=[0.70, 0.30]),
-    'wpml_active': np.random.choice([0, 1], n, p=[0.85, 0.15]),
-    'yoast_seo_active': np.random.choice([0, 1], n, p=[0.60, 0.40]),
-    'revslider_active': np.random.choice([0, 1], n, p=[0.80, 0.20]),
-    'gravity_forms_active': np.random.choice([0, 1], n, p=[0.90, 0.10]),
-    'php_score': np.random.choice([0, 1, 2, 3, 4], n, p=[0.15, 0.25, 0.30, 0.20, 0.10]),
-    'cache_enabled': np.random.choice([0, 1], n, p=[0.30, 0.70]),
-    'cdn_enabled': np.random.choice([0, 1], n, p=[0.40, 0.60]),
-    'wp_factor': np.random.choice([0, 1, 2], n, p=[0.30, 0.50, 0.20]),
-}
-
-df = pd.DataFrame(data)
-
-# Features dérivées
-df['total_iops'] = df['iops_read'] + df['iops_write']
-df['heavy_plugins_count'] = (
-    df['woocommerce_active'] + df['elementor_active'] + df['wpml_active'] +
-    df['yoast_seo_active'] + df['revslider_active'] + df['gravity_forms_active']
-)
-
-# Calcul de la charge prédite (pondéré par les F-Score de référence)
-charge = (
-    df['wp_factor'].map({0: 1.3, 1: 1.0, 2: 0.7}) * REFERENCE_FSCORE['wp_factor'] * 100 +
-    (df['visitors_per_day'] / 5000) * REFERENCE_FSCORE['visitors_per_day'] * 100 +
-    (df['disk_usage_avg'] / 100) * REFERENCE_FSCORE['disk_usage_avg'] * 100 +
-    (df['disk_usage_max'] / 100) * REFERENCE_FSCORE['disk_usage_max'] * 100 +
-    (df['cpu_usage_avg'] / 100) * REFERENCE_FSCORE['cpu_usage_avg'] * 100 +
-    (df['php_score'] / 4) * REFERENCE_FSCORE['php_score'] * 100 +
-    (df['ram_usage_avg'] / 100) * REFERENCE_FSCORE['ram_usage_avg'] * 100 +
-    df['cache_enabled'] * REFERENCE_FSCORE['cache_enabled'] * 100 +
-    ((df['traffic_growth_rate'] + 10) / 60) * REFERENCE_FSCORE['traffic_growth_rate'] * 100 +
-    (df['ram_usage_max'] / 100) * REFERENCE_FSCORE['ram_usage_max'] * 100 +
-    (df['cpu_usage_peak'] / 100) * REFERENCE_FSCORE['cpu_usage_peak'] * 100 +
-    (df['response_time'] / 5000) * REFERENCE_FSCORE['response_time'] * 100 +
-    (df['total_iops'] / 80000) * REFERENCE_FSCORE['total_iops'] * 100 +
-    (df['heavy_plugins_count'] / 6) * REFERENCE_FSCORE['heavy_plugins_count'] * 100 +
-    (df['plugin_count'] / 100) * REFERENCE_FSCORE['plugin_count'] * 100
-)
-
-df['predicted_load'] = np.clip(charge + np.random.normal(0, 10, n), 0, 100)  # Bruit augmenté pour complexité
-
-# Sauvegarde CSV
-csv_path = 'data/training_dataset.csv'
-df.to_csv(csv_path, index=False)
-print(f"✅ {csv_path}")
-print(f"   {df.shape[0]:,} lignes × {df.shape[1]} colonnes")
-
-# ============================================================
-# 2. ENTRAÎNEMENT DU MODÈLE
-# ============================================================
-print(f"\n{'='*70}")
-print(f"ÉTAPE 2/5: Entraînement du modèle XGBoost")
-print(f"{'='*70}")
-
-feature_cols = [
-    'visitors_per_day', 'pages_per_day', 'traffic_growth_rate',
-    'peak_start_hour', 'peak_end_hour',
-    'cpu_usage_avg', 'cpu_usage_peak', 'ram_usage_avg', 'ram_usage_max',
-    'disk_usage_avg', 'disk_usage_max', 'response_time',
-    'iops_read', 'iops_write', 'total_iops',
-    'plugin_count', 'heavy_plugins_count',
-    'woocommerce_active', 'elementor_active', 'wpml_active',
-    'yoast_seo_active', 'revslider_active', 'gravity_forms_active',
-    'php_score', 'cache_enabled', 'cdn_enabled', 'wp_factor'
+HEAVY_PLUGIN_OPTIONS = [
+    "woocommerce",
+    "elementor",
+    "wpml",
+    "yoast",
+    "revslider",
+    "gravityforms",
 ]
 
-X = df[feature_cols].copy()
-y = df['predicted_load'].values
+PHP_VERSIONS = ["7.4", "8.0", "8.1", "8.2", "8.3"]
+WP_TYPES = ["small", "medium", "performance"]
 
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
-
-X_train, X_test, y_train, y_test = train_test_split(
-    X_scaled, y, test_size=0.2, random_state=RANDOM_STATE
-)
-
-print(f"   Features : {len(feature_cols)}")
-print(f"   Train    : {len(X_train):,}")
-print(f"   Test     : {len(X_test):,}")
-
-print(f"\n🚀 Entraînement en cours...")
-start_time = time.time()
-
-model = xgb.XGBRegressor(
-    n_estimators=3000,           # Beaucoup d'arbres
-    max_depth=20,                # Profondeur maximale
-    learning_rate=0.03,
-    subsample=1.0,               # Utilise tout le dataset à chaque arbre
-    colsample_bytree=1.0,        # Utilise toutes les features à chaque arbre
-    min_child_weight=1,          # Autorise des feuilles plus petites
-    gamma=0,                     # Pas de régularisation gamma
-    reg_alpha=0.05,
-    reg_lambda=1.0,
-    objective='reg:squarederror',
-    random_state=RANDOM_STATE,
-    n_jobs=-1,
-    tree_method='hist',
-    early_stopping_rounds=None,  # Désactive l'arrêt anticipé pour arbres très complets
-    eval_metric='rmse',
-    verbosity=0
-)
-
-model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
-
-
-train_time = time.time() - start_time
-print(f"   ✅ Terminé en {train_time:.1f}s")
-try:
-    print(f"   📊 Itérations : {model.best_iteration}")
-except Exception:
-    print(f"   📊 Itérations : {model.n_estimators}")
-if hasattr(model, 'best_score') and model.best_score is not None:
-    print(f"   📊 Best score : {model.best_score:.4f}")
-else:
-    print("   📊 Best score : (non disponible sans early stopping)")
-
-# ============================================================
-# 3. ÉVALUATION
-# ============================================================
-print(f"\n{'='*70}")
-print(f"ÉTAPE 3/5: Évaluation")
-print(f"{'='*70}")
-
-y_pred = model.predict(X_test)
-rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-mae = mean_absolute_error(y_test, y_pred)
-r2 = r2_score(y_test, y_pred)
-
-print(f"   RMSE : {rmse:.4f}")
-print(f"   MAE  : {mae:.4f}")
-print(f"   R²   : {r2:.4f}")
-
-# ============================================================
-# 4. SAUVEGARDE DU MODÈLE
-# ============================================================
-print(f"\n{'='*70}")
-print(f"ÉTAPE 4/5: Sauvegarde du modèle")
-print(f"{'='*70}")
-
-model_data = {
-    'model': model,
-    'scaler': scaler,
-    'features': feature_cols,
-    'reference_fscore': REFERENCE_FSCORE,
-    'metrics': {'rmse': rmse, 'mae': mae, 'r2': r2},
+FEATURE_LABELS = {
+    "visitors_per_day": "Visiteurs / jour",
+    "pageviews_per_day": "Pages vues / jour",
+    "traffic_growth_rate": "Taux de croissance (%)",
+    "peak_hours_start": "Pic début (heure)",
+    "peak_hours_end": "Pic fin (heure)",
+    "cpu_usage_avg": "CPU moyen (%)",
+    "cpu_usage_peak": "CPU max (%)",
+    "ram_usage_avg": "RAM moyenne (%)",
+    "ram_usage_max": "RAM max (%)",
+    "disk_usage_avg": "Disque utilisé (%)",
+    "disk_usage_max": "Disque max (%)",
+    "response_time": "Temps réponse (ms)",
+    "disk_read_iops": "IOPS Read",
+    "disk_write_iops": "IOPS Write",
+    "plugin_count": "Nombre de plugins",
+    "heavy_plugins": "Plugins lourds",
+    "php_version": "Version PHP",
+    "cache_enabled": "Cache activé",
+    "cdn_enabled": "CDN activé",
+    "wp_type": "Pack WordPress",
 }
 
-joblib.dump(model_data, 'models/model.pkl')
-print(f"✅ models/model.pkl")
+FEATURE_ORDER = list(FEATURE_LABELS.keys())
 
-# ============================================================
-# 5. GÉNÉRATION DES GRAPHIQUES
-# ============================================================
-print(f"\n{'='*70}")
-print(f"ÉTAPE 5/5: Génération des graphiques")
-print(f"{'='*70}")
-
-# --- F-Score RÉELS du modèle ---
-print(f"\n📊 F-Score du modèle vs Référence:")
-print(f"   {'Feature':<25s} {'Réel':>8s}  {'Réf':>8s}")
-print(f"   {'─'*43}")
-importance = model.feature_importances_
-fscore_real = dict(zip(feature_cols, importance))
-
-for feat in REFERENCE_FSCORE.keys():
-    real_val = fscore_real.get(feat, 0)
-    ref_val = REFERENCE_FSCORE[feat]
-    print(f"   {feat:<25s} {real_val:>8.4f}  {ref_val:>8.4f}")
-
-
-# --- ARBRE 0 (COMPLET - Max largeur) ---
-
-
-print(f"\n🌳 Génération tree_0.png (arbre #0 complet)...")
-import xgboost
-import graphviz
-print(f"Type du modèle pour graphviz : {type(model)}")
-print("XGBoost version:", xgboost.__version__)
-print("Graphviz (python) version:", graphviz.__version__)
-try:
-    try:
-        graph_0 = xgb.to_graphviz(model, num_trees=0, rankdir='TB')
-        print("Succès avec model (XGBRegressor)")
-    except Exception as e1:
-        print(f"   ⚠️ Échec avec model : {e1}, tentative explicite avec model.get_booster()...")
-        try:
-            graph_0 = xgb.to_graphviz(model.get_booster(), num_trees=0, rankdir='TB')
-            print("Succès avec model.get_booster()")
-            graph_0.render('graphe/tree_0_booster', format='png', cleanup=True)
-        except Exception as e2:
-            print("Échec explicite avec model.get_booster():", e2)
-            raise e2
-    # Ajout d'un titre personnalisé sur l'arbre 0 via add_title_to_source
-    graph_0 = add_title_to_source(graph_0, "🌳 Arbre XGBoost - Tree 0 (Charge)")
-    graph_0.render('graphe/tree_0', format='png', cleanup=True)
-    print("   ✅ graphe/tree_0.png (arbre complet)")
-except Exception as e:
-    print(f"   ⚠️ Graphviz non disponible ou erreur de génération: {e}")
-    with open('graphe/tree_0.txt', 'w') as f:
-        f.write(model.get_booster().get_dump()[0])
-    print("   ✅ graphe/tree_0.txt")
+IMPACT_REFERENCE = {
+    "visitors_per_day": {"rank": 1, "impact": 5, "detail": "#1 ABSOLU - Le trafic determine tout"},
+    "cpu_usage_avg": {"rank": 2, "impact": 5, "detail": "Charge processeur constante"},
+    "ram_usage_avg": {"rank": 3, "impact": 5, "detail": "Memoire utilisee en continu"},
+    "wp_type": {"rank": 4, "impact": 4, "detail": "small/medium/performance"},
+    "traffic_growth_rate": {"rank": 5, "impact": 4, "detail": "+5% vs +25% par mois"},
+    "cpu_usage_peak": {"rank": 6, "impact": 4, "detail": "Les pics CPU sont critiques"},
+    "plugin_count": {"rank": 7, "impact": 4, "detail": "Chaque plugin = requetes SQL"},
+    "ram_usage_max": {"rank": 8, "impact": 4, "detail": "Les pics RAM provoquent des SWAP"},
+    "heavy_plugins": {"rank": 9, "impact": 4, "detail": "WooCommerce/Elementor"},
+    "cache_enabled": {"rank": 10, "impact": 4, "detail": "OUI = -40% charge"},
+    "php_version": {"rank": 11, "impact": 3, "detail": "PHP 8.2 = 30% plus rapide"},
+    "disk_usage_avg": {"rank": 12, "impact": 3, "detail": ">85% = ralentissement"},
+    "disk_usage_max": {"rank": 13, "impact": 2, "detail": "Pics d'ecriture backups"},
+    "cdn_enabled": {"rank": 14, "impact": 2, "detail": "Decharge le serveur"},
+    "disk_write_iops": {"rank": 15, "impact": 2, "detail": "Ecritures disque"},
+    "disk_read_iops": {"rank": 16, "impact": 2, "detail": "Lectures disque"},
+    "response_time": {"rank": 17, "impact": 2, "detail": "Symptome de charge"},
+    "pageviews_per_day": {"rank": 18, "impact": 2, "detail": "Impact indirect"},
+    "peak_hours_start": {"rank": 19, "impact": 1, "detail": "Heure debut pic"},
+    "peak_hours_end": {"rank": 20, "impact": 1, "detail": "Heure fin pic"},
+}
 
 
-# --- ARBRE FINAL (COMPLET - Max largeur) ---
-
-last_tree = model.best_iteration - 1
-print(f"\n🌳 Génération tree_final.png (arbre #{last_tree} complet)...")
-
-print(f"Type du modèle pour graphviz : {type(model)}")
-print("XGBoost version:", xgboost.__version__)
-print("Graphviz (python) version:", graphviz.__version__)
-try:
-    try:
-        graph_final = xgb.to_graphviz(model, num_trees=last_tree, rankdir='TB')
-        print("Succès avec model (XGBRegressor)")
-    except Exception as e1:
-        print(f"   ⚠️ Échec avec model : {e1}, tentative explicite avec model.get_booster()...")
-        try:
-            graph_final = xgb.to_graphviz(model.get_booster(), num_trees=last_tree, rankdir='TB')
-            print("Succès avec model.get_booster()")
-            graph_final.render('graphe/tree_final_booster', format='png', cleanup=True)
-        except Exception as e2:
-            print("Échec explicite avec model.get_booster():", e2)
-            raise e2
-    # Ajout d'un titre personnalisé sur l'arbre final via add_title_to_source
-    graph_final = add_title_to_source(graph_final, f"🌳 Arbre XGBoost - Tree {last_tree} (Dernier)")
-    graph_final.render('graphe/tree_final', format='png', cleanup=True)
-    print(f"   ✅ graphe/tree_final.png (arbre complet)")
-except Exception as e:
-    print(f"   ⚠️ Graphviz non disponible ou erreur de génération: {e}")
-    arbres = model.get_booster().get_dump()
-    with open('graphe/tree_final.txt', 'w') as f:
-        f.write(arbres[last_tree])
-    print("   ✅ graphe/tree_final.txt")
+def ensure_directories() -> None:
+    for directory in (DATA_DIR, MODELS_DIR, GRAPHE_DIR):
+        directory.mkdir(parents=True, exist_ok=True)
 
 
-# --- FEATURE IMPORTANCE (COHÉRENTE AVEC LE MODÈLE) ---
-print(f"\n📊 Génération feature_importance.png (importances réelles du modèle)...")
+def random_time(rng: np.random.Generator, size: int, start_hour: int, end_hour: int) -> np.ndarray:
+    hours = rng.integers(start_hour, end_hour + 1, size=size)
+    minutes = rng.choice([0, 15, 30, 45], size=size)
+    return np.array([f"{hour:02d}:{minute:02d}" for hour, minute in zip(hours, minutes)])
 
-# Utiliser les importances réelles du modèle XGBoost
-fscore_real = dict(zip(feature_cols, model.feature_importances_))
-sorted_real = sorted(fscore_real.items(), key=lambda x: x[1])
-feature_names_display = [f[0] for f in sorted_real]
-fscore_values_display = [f[1] for f in sorted_real]
 
-import matplotlib.colors as mcolors
-from matplotlib import cm
+def generate_training_dataset(n_samples: int = N_SAMPLES) -> pd.DataFrame:
+    rng = np.random.default_rng(RANDOM_STATE)
 
-fig, ax = plt.subplots(figsize=(10, 8), dpi=DPI)
-fig.patch.set_facecolor('white')
+    visitors_per_day = rng.integers(50, 150_001, size=n_samples)
+    pageviews_per_day = np.maximum(
+        visitors_per_day * rng.uniform(1.2, 6.5, size=n_samples),
+        rng.integers(80, 600, size=n_samples),
+    ).astype(int)
+    traffic_growth_rate = rng.uniform(0, 85, size=n_samples).round(2)
 
-n_feat = len(feature_names_display)
-y_positions = np.arange(n_feat)
-colors = [cm.get_cmap('RdYlGn_r')(i/(n_feat-1)) for i in range(n_feat)]
+    plugin_count = rng.integers(1, 81, size=n_samples)
+    heavy_plugin_matrix = rng.binomial(
+        1,
+        [0.35, 0.45, 0.18, 0.42, 0.16, 0.14],
+        size=(n_samples, 6),
+    )
+    heavy_plugin_count = heavy_plugin_matrix.sum(axis=1)
 
-bars = ax.barh(
-    y_positions,
-    fscore_values_display,
-    height=0.65,
-    color=colors,
-    edgecolor='#4A86C8',
-    linewidth=0.3,
-    alpha=1.0
-)
+    php_version = rng.choice(PHP_VERSIONS, size=n_samples, p=[0.08, 0.16, 0.25, 0.31, 0.20])
+    cache_enabled = rng.choice(["oui", "non"], size=n_samples, p=[0.68, 0.32])
+    cdn_enabled = rng.choice(["oui", "non"], size=n_samples, p=[0.56, 0.44])
+    wp_type = rng.choice(WP_TYPES, size=n_samples, p=[0.38, 0.42, 0.20])
 
-# Valeurs à droite des barres (style image)
-for i, (bar, val) in enumerate(zip(bars, fscore_values_display)):
-    ax.text(
-        bar.get_width() + 0.0015,
-        bar.get_y() + bar.get_height() / 2,
-        f'{val:.3f}',
-        va='center',
-        ha='left',
-        fontsize=8.5,
-        fontweight='medium',
-        color=TEXT_COLOR,
-        fontfamily='monospace'
+    cache_factor = np.where(cache_enabled == "oui", 0.72, 1.18)
+    cdn_factor = np.where(cdn_enabled == "oui", 0.82, 1.08)
+    wp_factor = pd.Series(wp_type).map(
+        {"small": 0.85, "medium": 1.0, "performance": 1.22}
+    ).to_numpy()
+    php_factor = pd.Series(php_version).map(
+        {"7.4": 1.16, "8.0": 1.08, "8.1": 1.02, "8.2": 0.96, "8.3": 0.92}
+    ).to_numpy()
+
+    traffic_pressure = visitors_per_day / 150_000
+    pageview_pressure = pageviews_per_day / 900_000
+    growth_pressure = traffic_growth_rate / 85
+    plugin_pressure = plugin_count / 80
+    heavy_plugin_pressure = heavy_plugin_count / len(HEAVY_PLUGIN_OPTIONS)
+
+    load_index = (
+        (traffic_pressure * 42)
+        + (growth_pressure * 19)
+        + (plugin_pressure * 16)
+        + (heavy_plugin_pressure * 18)
+        + (pageview_pressure * 8)
+    ) * cache_factor * cdn_factor * wp_factor * php_factor
+
+    noise = rng.normal(0, 5.5, size=n_samples)
+
+    cpu_usage_avg = np.clip(18 + load_index * 0.78 + noise, 5, 96).round(2)
+    cpu_usage_peak = np.clip(cpu_usage_avg + rng.uniform(8, 32, size=n_samples), 8, 100).round(2)
+    ram_usage_avg = np.clip(22 + load_index * 0.64 + plugin_count * 0.32 + noise, 8, 97).round(2)
+    ram_usage_max = np.clip(ram_usage_avg + rng.uniform(8, 28, size=n_samples), 12, 100).round(2)
+    disk_usage_avg = np.clip(rng.normal(42, 17, size=n_samples) + plugin_count * 0.24, 5, 96).round(2)
+    disk_usage_max = np.clip(disk_usage_avg + rng.uniform(4, 24, size=n_samples), 8, 100).round(2)
+    response_time = np.clip(
+        95 + load_index * 7.5 + heavy_plugin_count * 18 + rng.normal(0, 45, size=n_samples),
+        40,
+        5000,
+    ).round(2)
+    disk_read_iops = np.clip(
+        18 + pageviews_per_day / 280 + rng.normal(0, 20, size=n_samples),
+        1,
+        3500,
+    ).round(2)
+    disk_write_iops = np.clip(
+        12 + visitors_per_day / 520 + plugin_count * 1.7 + rng.normal(0, 18, size=n_samples),
+        1,
+        2800,
+    ).round(2)
+
+    wp_type_score = pd.Series(wp_type).map(
+        {"small": 32, "medium": 62, "performance": 88}
+    ).to_numpy()
+    php_risk_score = pd.Series(php_version).map(
+        {"7.4": 85, "8.0": 68, "8.1": 54, "8.2": 38, "8.3": 30}
+    ).to_numpy()
+    cache_risk_score = np.where(cache_enabled == "oui", 25, 80)
+    cdn_risk_score = np.where(cdn_enabled == "oui", 35, 58)
+
+    recommended_capacity_score = np.clip(
+        0.210 * (traffic_pressure * 100)
+        + 0.145 * cpu_usage_avg
+        + 0.135 * ram_usage_avg
+        + 0.095 * wp_type_score
+        + 0.085 * (growth_pressure * 100)
+        + 0.070 * cpu_usage_peak
+        + 0.060 * (plugin_pressure * 100)
+        + 0.055 * ram_usage_max
+        + 0.050 * (heavy_plugin_pressure * 100)
+        + 0.040 * cache_risk_score
+        + 0.025 * php_risk_score
+        + 0.014 * disk_usage_avg
+        + 0.008 * disk_usage_max
+        + 0.007 * cdn_risk_score
+        + 0.005 * np.clip(disk_write_iops / 28, 0, 100)
+        + 0.003 * np.clip(disk_read_iops / 35, 0, 100)
+        + 0.003 * np.clip(response_time / 50, 0, 100)
+        + 0.003 * np.clip(pageview_pressure * 100, 0, 100)
+        + 0.001 * rng.uniform(0, 100, size=n_samples)
+        + 0.001 * rng.uniform(0, 100, size=n_samples)
+        + rng.normal(0, 1.8, size=n_samples),
+        1,
+        100,
+    ).round(4)
+
+    data = pd.DataFrame(
+        {
+            "visitors_per_day": visitors_per_day,
+            "pageviews_per_day": pageviews_per_day,
+            "traffic_growth_rate": traffic_growth_rate,
+            "peak_hours_start": random_time(rng, n_samples, 6, 12),
+            "peak_hours_end": random_time(rng, n_samples, 15, 23),
+            "cpu_usage_avg": cpu_usage_avg,
+            "cpu_usage_peak": cpu_usage_peak,
+            "ram_usage_avg": ram_usage_avg,
+            "ram_usage_max": ram_usage_max,
+            "disk_usage_avg": disk_usage_avg,
+            "disk_usage_max": disk_usage_max,
+            "response_time": response_time,
+            "disk_read_iops": disk_read_iops,
+            "disk_write_iops": disk_write_iops,
+            "plugin_count": plugin_count,
+            "php_version": php_version,
+            "cache_enabled": cache_enabled,
+            "cdn_enabled": cdn_enabled,
+            "wp_type": wp_type,
+            "recommended_capacity_score": recommended_capacity_score,
+        }
     )
 
-ax.set_yticks(y_positions)
-ax.set_yticklabels(feature_names_display, fontsize=8, color='#444444')
-max_val = max(fscore_values_display)
-ax.set_xlim(0, max_val * 1.20)
-ax.set_xlabel('Importance (F-score)', fontsize=10, fontweight='bold', color=TITLE_COLOR, labelpad=8)
-ax.xaxis.set_major_locator(ticker.MaxNLocator(8))
-ax.tick_params(axis='x', labelsize=7.5, colors='#555555')
-ax.set_title('Feature Importance (F-score)', fontsize=12, fontweight='bold', color=TITLE_COLOR, pad=12)
-mean_fscore = np.mean(fscore_values_display)
-ax.axvline(
-    x=mean_fscore,
-    color=MEAN_LINE_COLOR,
-    linestyle='--',
-    linewidth=1.0,
-    alpha=0.5,
-    label=f'Moyenne: {mean_fscore:.3f}'
-)
-ax.legend(fontsize=7.5, loc='lower right', framealpha=0.9, edgecolor='#CCCCCC', facecolor='white')
-ax.grid(True, alpha=0.2, axis='x', color=GRID_COLOR, linestyle='-', linewidth=0.4)
-ax.set_axisbelow(True)
-ax.spines['top'].set_visible(False)
-ax.spines['right'].set_visible(False)
-ax.spines['left'].set_color('#CCCCCC')
-ax.spines['left'].set_linewidth(0.8)
-ax.spines['bottom'].set_color('#CCCCCC')
-ax.spines['bottom'].set_linewidth(0.8)
+    for index, plugin_name in enumerate(HEAVY_PLUGIN_OPTIONS):
+        data[f"heavy_plugin_{plugin_name}"] = heavy_plugin_matrix[:, index]
 
-plt.tight_layout(pad=1.5)
-feat_path = f'graphe/feature_importance_{TIMESTAMP}.png'
-plt.savefig(feat_path, dpi=DPI, bbox_inches='tight', facecolor='white', edgecolor='none')
-plt.close()
-print(f"   ✅ {feat_path}")
+    data["heavy_plugins"] = [
+        ",".join(plugin for plugin, enabled in zip(HEAVY_PLUGIN_OPTIONS, row) if enabled)
+        for row in heavy_plugin_matrix
+    ]
 
-# ============================================================
-# SAUVEGARDE DES MÉTRIQUES DANS UN FICHIER JSON
-# ============================================================
-import json
-metrics_path = 'data/model_metrics_all.json'
-with open(metrics_path, 'w') as f:
-    json.dump({'rmse': rmse, 'mae': mae, 'r2': r2}, f, indent=2)
-print(f"✅ {metrics_path}")
+    ordered_columns = [
+        "visitors_per_day",
+        "pageviews_per_day",
+        "traffic_growth_rate",
+        "peak_hours_start",
+        "peak_hours_end",
+        "cpu_usage_avg",
+        "cpu_usage_peak",
+        "ram_usage_avg",
+        "ram_usage_max",
+        "disk_usage_avg",
+        "disk_usage_max",
+        "response_time",
+        "disk_read_iops",
+        "disk_write_iops",
+        "plugin_count",
+        "heavy_plugins",
+        *[f"heavy_plugin_{name}" for name in HEAVY_PLUGIN_OPTIONS],
+        "php_version",
+        "cache_enabled",
+        "cdn_enabled",
+        "wp_type",
+        "recommended_capacity_score",
+    ]
 
-# ============================================================
-# RÉSUMÉ FINAL
-# ============================================================
-print(f"\n{'='*70}")
-print(f"✅ GÉNÉRATION TERMINÉE !")
-print(f"{'='*70}")
-print(f"""
+    return data[ordered_columns]
+
+
+def add_time_features(frame: pd.DataFrame) -> pd.DataFrame:
+    prepared = frame.copy()
+
+    for column in ("peak_hours_start", "peak_hours_end"):
+        split_time = prepared[column].str.split(":", expand=True).astype(int)
+        prepared[f"{column}_minutes"] = split_time[0] * 60 + split_time[1]
+
+    prepared["peak_duration_minutes"] = (
+        prepared["peak_hours_end_minutes"] - prepared["peak_hours_start_minutes"]
+    ).clip(lower=0)
+
+    return prepared.drop(columns=["peak_hours_start", "peak_hours_end", "heavy_plugins"])
+
+
+def prepare_features(dataset: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
+    prepared = add_time_features(dataset)
+    target = prepared.pop("recommended_capacity_score")
+
+    features = pd.get_dummies(
+        prepared,
+        columns=["php_version", "cache_enabled", "cdn_enabled", "wp_type"],
+        drop_first=False,
+        dtype=int,
+    )
+
+    return features, target
+
+
+def save_tree_plot(model: XGBRegressor, tree_index: int, output_path: Path) -> None:
+    plt.figure(figsize=(80, 80))
+    plot_tree(model, num_trees=tree_index, rankdir="LR", ax=plt.gca())
+    tree_title = "Premier arbre XGBoost" if tree_index == 0 else "Dernier arbre XGBoost"
+    plt.title(tree_title, fontsize=72, pad=40, fontweight='bold')
+    plt.axis("off")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=180, bbox_inches="tight", pad_inches=1.5)
+    plt.close()
+
+
+def normalize_feature_name(feature_name: str) -> str:
+    if feature_name.startswith("peak_hours_start"):
+        return "peak_hours_start"
+    if feature_name.startswith("peak_hours_end"):
+        return "peak_hours_end"
+    if feature_name.startswith("heavy_plugin_"):
+        return "heavy_plugins"
+    if feature_name.startswith("php_version_"):
+        return "php_version"
+    if feature_name.startswith("cache_enabled_"):
+        return "cache_enabled"
+    if feature_name.startswith("cdn_enabled_"):
+        return "cdn_enabled"
+    if feature_name.startswith("wp_type_"):
+        return "wp_type"
+    return feature_name
+
+
+def save_feature_importance(model: XGBRegressor, timestamp: str) -> Path:
+    output_path = GRAPHE_DIR / f"feature_importance_{timestamp}.png"
+
+    raw_scores = model.get_booster().get_score(importance_type="weight")
+    grouped_scores = {feature: 0.0 for feature in FEATURE_ORDER}
+
+    for raw_feature, score in raw_scores.items():
+        feature = normalize_feature_name(raw_feature)
+        if feature in grouped_scores:
+            grouped_scores[feature] += float(score)
+
+    plot_data = pd.DataFrame(
+        {
+            "feature": FEATURE_ORDER,
+            "label": [FEATURE_LABELS[feature] for feature in FEATURE_ORDER],
+            "f_score": [grouped_scores[feature] for feature in FEATURE_ORDER],
+        }
+    ).sort_values("f_score", ascending=True)
+
+    colors = plt.cm.turbo(np.linspace(0.05, 0.95, len(plot_data)))
+
+    figure, axis = plt.subplots(figsize=(16, 12))
+    bars = axis.barh(plot_data["label"], plot_data["f_score"], color=colors, height=0.72)
+
+    for bar in bars:
+        width = bar.get_width()
+        axis.text(
+            width + max(plot_data["f_score"].max() * 0.01, 0.5),
+            bar.get_y() + bar.get_height() / 2,
+            f"{width:.0f}",
+            va="center",
+            fontsize=10,
+            color="#333333",
+        )
+
+    axis.grid(axis="x", linestyle="--", alpha=0.35)
+    axis.set_facecolor("#FFFFFF")
+    figure.patch.set_facecolor("#FFFFFF")
+    axis.set_xlabel("F-Score", fontsize=12)
+    axis.set_ylabel("")
+    axis.set_title("Feature Importance", fontsize=16, fontweight="bold")
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+    return output_path
+
+
+def train_model() -> dict:
+    ensure_directories()
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    dataset = generate_training_dataset()
+    dataset.to_csv(DATASET_PATH, index=False)
+
+    features, target = prepare_features(dataset)
+
+    x_train, x_test, y_train, y_test = train_test_split(
+        features,
+        target,
+        test_size=0.2,
+        random_state=RANDOM_STATE,
+    )
+
+    model = XGBRegressor(
+        objective="reg:squarederror",
+        n_estimators=450,
+        max_depth=5,
+        learning_rate=0.045,
+        subsample=0.9,
+        colsample_bytree=0.9,
+        min_child_weight=3,
+        reg_alpha=0.05,
+        reg_lambda=1.2,
+        random_state=RANDOM_STATE,
+        n_jobs=-1,
+        tree_method="hist",
+    )
+
+    start_time = time.perf_counter()
+    model.fit(x_train, y_train)
+    train_time = time.perf_counter() - start_time
+
+    predictions = model.predict(x_test)
+
+    rmse = mean_squared_error(y_test, predictions, squared=False)
+    mae = mean_absolute_error(y_test, predictions)
+    r2 = r2_score(y_test, predictions)
+    relative_errors = np.abs(y_test.to_numpy() - predictions) / np.maximum(np.abs(y_test.to_numpy()), 1e-8)
+    accuracy = max(0.0, 100.0 * (1.0 - float(np.mean(relative_errors))))
+
+    joblib.dump(
+        {
+            "model": model,
+            "feature_columns": features.columns.tolist(),
+            "target_column": "recommended_capacity_score",
+            "heavy_plugin_options": HEAVY_PLUGIN_OPTIONS,
+            "categorical_options": {
+                "php_version": PHP_VERSIONS,
+                "cache_enabled": ["oui", "non"],
+                "cdn_enabled": ["oui", "non"],
+                "wp_type": WP_TYPES,
+            },
+            "impact_reference": IMPACT_REFERENCE,
+        },
+        MODEL_PATH,
+    )
+
+    final_tree_index = max(0, model.get_booster().num_boosted_rounds() - 1)
+
+    save_tree_plot(model, 0, GRAPHE_DIR / "tree_0.png")
+    save_tree_plot(model, final_tree_index, GRAPHE_DIR / "tree_final.png")
+
+    feature_importance_path = save_feature_importance(model, timestamp)
+
+    # Génération de la courbe d'apprentissage (MSE)
+    from sklearn.model_selection import learning_curve
+    train_sizes_abs, train_scores, val_scores = learning_curve(
+        model,
+        x_train,
+        y_train,
+        train_sizes=np.linspace(0.15, 1.0, 7),
+        cv=3,
+        scoring="neg_mean_squared_error",
+        n_jobs=1,
+        shuffle=True,
+        random_state=RANDOM_STATE,
+    )
+    train_mse = -train_scores.mean(axis=1)
+    val_mse = -val_scores.mean(axis=1)
+    fig, ax = plt.subplots(figsize=(12, 8))
+    ax.plot(train_sizes_abs, train_mse, "o-", color="#2563eb", linewidth=2.6, markersize=8, label="Entraînement")
+    ax.plot(train_sizes_abs, val_mse, "s-", color="#10b981", linewidth=2.6, markersize=8, label="Validation")
+    ax.fill_between(train_sizes_abs, train_mse, val_mse, color="#94a3b8", alpha=0.16)
+    ax.set_title("Courbe d'apprentissage XGBoost", fontsize=16, fontweight="bold")
+    ax.set_xlabel("Nombre d'échantillons")
+    ax.set_ylabel("MSE")
+    ax.grid(alpha=0.3)
+    ax.legend()
+    plt.tight_layout()
+    learning_curve_path = GRAPHE_DIR / f"learning_curve_{timestamp}.png"
+    plt.savefig(learning_curve_path, dpi=180, bbox_inches="tight", facecolor="white")
+    plt.close()
+
+    metrics = {
+        "timestamp": timestamp,
+        "samples": N_SAMPLES,
+        "target_column": "recommended_capacity_score",
+        "rmse": round(float(rmse), 6),
+        "mse": round(float(rmse**2), 6),
+        "mae": round(float(mae), 6),
+        "r2": round(float(r2), 6),
+        "accuracy": round(float(accuracy), 2),
+        "train_time_seconds": round(float(train_time), 4),
+        "impact_reference": IMPACT_REFERENCE,
+        "files_generated": {
+            "dataset": str(DATASET_PATH),
+            "model": str(MODEL_PATH),
+            "tree_0": str(GRAPHE_DIR / "tree_0.png"),
+            "tree_final": str(GRAPHE_DIR / "tree_final.png"),
+            "feature_importance": str(feature_importance_path),
+            "metrics": str(METRICS_PATH),
+            "learning_curve": str(learning_curve_path),
+        },
+    }
+
+    METRICS_PATH.write_text(
+        json.dumps(metrics, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    print(
+        f"""
 📁 Fichiers générés:
 ├── data/training_dataset.csv
 ├── models/model.pkl
 ├── graphe/tree_0.png              (50×200 pouces, arbre COMPLET)
 ├── graphe/tree_final.png          (50×200 pouces, arbre COMPLET)
-└── graphe/feature_importance_{TIMESTAMP}.png
+└── graphe/feature_importance_{timestamp}.png
 |__ data/model_metrics_all.json
 
 📊 Performances:
 ├── RMSE : {rmse:.4f}
+    mse = {rmse**2:.4f}
 ├── MAE  : {mae:.4f}
 ├── R²   : {r2:.4f}
 └── Temps: {train_time:.1f}s
@@ -453,4 +520,11 @@ print(f"""
 ├── Couleur barres: {BAR_COLOR} (identique à l'image)
 ├── F-Score: Valeurs de référence
 └── Format: Identique à feature_importance_20260505_140251.png
-""")
+"""
+    )
+
+    return metrics
+
+
+if __name__ == "__main__":
+    train_model()

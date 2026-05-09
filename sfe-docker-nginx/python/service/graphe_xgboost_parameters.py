@@ -1,35 +1,73 @@
+def graph_response_time_projection(model_load, features_df, normalized, feature_columns):
+    """
+    Projection dynamique du temps de réponse serveur sur 24 mois selon tous les paramètres du JSON.
+    """
+    try:
+        # Valeur initiale du temps de réponse
+        base_response_time = float(normalized.get("response_time", 350))
+        growth_rate_percent = max(0.0, float(normalized.get("traffic_growth_rate", 0)))
+        # On projette la croissance du trafic sur la charge serveur avec le modèle
+        months_projection = 24
+        months = np.arange(0, months_projection + 1)
+        response_times = []
+        current_features = features_df.copy()
+        for month in months:
+            # On met à jour le trafic selon la croissance
+            if month > 0:
+                current_features = current_features.copy()
+                current_features["visitors_per_day"] *= (1 + growth_rate_percent / 100)
+                current_features["pageviews_per_day"] *= (1 + growth_rate_percent / 100)
+            # Prédiction du temps de réponse avec le modèle
+            predicted = model_load.predict(current_features)[0]
+            # On suppose que le temps de réponse évolue proportionnellement à la charge prédite
+            response_times.append(predicted)
+        fig, ax = plt.subplots(figsize=(14, 7))
+        ax.plot(months, response_times, color="#f59e42", linewidth=3, marker="o", markersize=7, label="Temps de réponse projeté")
+        ax.set_title("Projection du temps de réponse serveur (modèle XGBoost)", fontsize=16, fontweight="bold")
+        ax.set_xlabel("Mois")
+        ax.set_ylabel("Temps de réponse projeté (ms)")
+        ax.grid(alpha=0.3)
+        ax.legend()
+        plt.tight_layout()
+        path = str(OUTPUT_DIR / f"response_time_projection_{TIMESTAMP}.png")
+        plt.savefig(path, dpi=180, bbox_inches="tight", facecolor="white")
+        plt.close()
+        return path
+    except Exception as exc:
+        print(f"Erreur projection temps de réponse: {exc}", file=sys.stderr)
+        return None
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-GÉNÉRATION DE TOUS LES GRAPHIQUES D'ANALYSE
-"""
+
+import glob
 import json
+import math
 import os
 import sys
-import math
-import glob
+from datetime import datetime
+from pathlib import Path
+
+import joblib
+import matplotlib
 import numpy as np
 import pandas as pd
-import joblib
-from pathlib import Path
-from datetime import datetime
-import matplotlib
-matplotlib.use('Agg')
+
+matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 import seaborn as sns
-from matplotlib.patches import FancyBboxPatch, Circle
+from sklearn.inspection import PartialDependenceDisplay
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import learning_curve
-from sklearn.inspection import PartialDependenceDisplay
 
-BASE_DIR = Path(__file__).parent
 
-# Configuration
+BASE_DIR = Path(__file__).resolve().parent
+
 if os.path.exists("/app"):
     MODELS_DIR = Path("/app/service/models")
     DATA_DIR = Path("/app/Donnee_parametres")
 else:
-    MODELS_DIR = BASE_DIR.parent / "models"
+    MODELS_DIR = BASE_DIR / "models"
     DATA_DIR = BASE_DIR.parent / "Donnee_parametres"
 
 MODEL_PATH = MODELS_DIR / "model.pkl"
@@ -37,704 +75,631 @@ OUTPUT_DIR = BASE_DIR / "analysis_exports"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
+SATURATION_LIMIT = 90.0
+
+HEAVY_PLUGIN_OPTIONS = [
+    "woocommerce",
+    "elementor",
+    "wpml",
+    "yoast",
+    "revslider",
+    "gravityforms",
+]
+
+PHP_VERSIONS = ["7.4", "8.0", "8.1", "8.2", "8.3"]
+WP_TYPES = ["small", "medium", "performance"]
+
+DEFAULTS = {
+    "visitors_per_day": 5000,
+    "pageviews_per_day": 150,
+    "traffic_growth_rate": 15,
+    "peak_hours_start": "09:00",
+    "peak_hours_end": "18:00",
+    "cpu_usage_avg": 45,
+    "cpu_usage_peak": 75,
+    "ram_usage_avg": 60,
+    "ram_usage_max": 85,
+    "disk_usage_avg": 45,
+    "disk_usage_max": 70,
+    "response_time": 350,
+    "disk_read_iops": 120,
+    "disk_write_iops": 80,
+    "plugin_count": 25,
+    "heavy_plugins": [],
+    "php_version": "8.2",
+    "cache_enabled": "oui",
+    "cdn_enabled": "oui",
+    "wp_type": "medium",
+}
+
+FRENCH_LABELS = {
+    "visitors_per_day": "Visiteurs / jour",
+    "pageviews_per_day": "Pages vues / jour",
+    "traffic_growth_rate": "Taux de croissance",
+    "peak_hours_start_minutes": "Pic début",
+    "peak_hours_end_minutes": "Pic fin",
+    "peak_duration_minutes": "Durée pic",
+    "cpu_usage_avg": "CPU moyen",
+    "cpu_usage_peak": "CPU max",
+    "ram_usage_avg": "RAM moyenne",
+    "ram_usage_max": "RAM max",
+    "disk_usage_avg": "Disque utilisé",
+    "disk_usage_max": "Disque max",
+    "response_time": "Temps réponse",
+    "disk_read_iops": "IOPS Read",
+    "disk_write_iops": "IOPS Write",
+    "plugin_count": "Nombre plugins",
+}
 
 
-# ============================================================================
-# CHARGEMENT DU MODÈLE (même fonction que partie 1)
-# ============================================================================
 def load_model():
     if not MODEL_PATH.exists():
         return None, None, None
-    models = joblib.load(str(MODEL_PATH))
-    ml = models.get('model_load', models.get('model', models)) if isinstance(models, dict) else models
-    fc = models.get('feature_columns', models.get('features', None)) if isinstance(models, dict) else None
-    sc = models.get('scaler', None) if isinstance(models, dict) else None
-    return ml, fc, sc
+
+    payload = joblib.load(str(MODEL_PATH))
+
+    if isinstance(payload, dict):
+        model = payload.get("model")
+        feature_columns = payload.get("feature_columns")
+        scaler = payload.get("scaler")
+    else:
+        model = payload
+        feature_columns = None
+        scaler = None
+
+    return model, feature_columns, scaler
 
 
 def find_latest_json():
     if not DATA_DIR.exists():
         return None
-    fichiers = sorted(glob.glob(str(DATA_DIR / "*.json")), key=os.path.getmtime, reverse=True)
-    return fichiers[0] if fichiers else None
+
+    files = sorted(
+        glob.glob(str(DATA_DIR / "*.json")),
+        key=os.path.getmtime,
+        reverse=True,
+    )
+    return files[0] if files else None
 
 
 def load_params(filepath):
-    with open(filepath, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-    params = data.get('parameters', data.get('params', data))
-    cleaned = {}
-    for k, v in params.items():
-        if isinstance(v, (int, float)):
-            cleaned[k] = v
-        elif isinstance(v, str):
-            try:
-                cleaned[k] = float(v) if '.' in v else int(v)
-            except:
-                cleaned[k] = v
-        else:
-            cleaned[k] = v
-    return cleaned
+    with open(filepath, "r", encoding="utf-8") as file:
+        data = json.load(file)
+
+    return data.get("parameters", data.get("params", data))
 
 
-# ============================================================================
-# GRAPHE 1 : PARTIAL DEPENDENCE PLOT (PDP) - TOUTES LES VARIABLES
-# ============================================================================
-def graph_partial_dependence(model_load, scaler, features_dict, feature_columns):
-    """
-    Partial Dependence Plot (PDP) : Montre l'effet de CHAQUE variable sur la prédiction.
-    Génère des courbes PDP pour TOUTES les variables du modèle.
-    """
+def to_float(value, default):
+    if value is None or value == "":
+        return float(default)
+
     try:
-        np.random.seed(42)
-        n_samples = 300
-        
-        # Générer des données simulées autour de la configuration actuelle
-        sim_data = []
-        for _ in range(n_samples):
-            sample = {}
-            for key, value in features_dict.items():
-                if isinstance(value, str):
-                    if value.lower() == "oui":
-                        sample[key] = 1
-                    elif value.lower() == "non":
-                        sample[key] = 0
-                    else:
-                        try:
-                            sample[key] = float(value)
-                        except Exception:
-                            sample[key] = 0.0
-                elif isinstance(value, (int, float)) and value != 0:
-                    sample[key] = max(0, value + np.random.normal(0, abs(value) * 0.15))
-                else:
-                    sample[key] = value
-            sim_data.append(sample)
-        
-        sim_df = pd.DataFrame(sim_data)
-        
-        # S'assurer que toutes les colonnes requises sont présentes
-        for col in feature_columns:
-            if col not in sim_df.columns:
-                sim_df[col] = 0.0
-        
-        # Nettoyer les valeurs
-        sim_df = sim_df.applymap(lambda x: 0.0 if x == 'none' or x is None else x)
-        sim_df = sim_df[feature_columns]
-        
-        # Appliquer le scaler si présent
-        if scaler is not None:
-            X_sim = scaler.transform(sim_df)
-        else:
-            X_sim = sim_df.values
-        
-        n_features = len(feature_columns)
-        n_cols = min(4, n_features)
-        n_rows = math.ceil(n_features / n_cols)
-        
-        fig_width = n_cols * 6
-        fig_height = n_rows * 5
-        
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_width, fig_height))
-        
-        if n_rows * n_cols > 1:
-            axes = axes.flatten()
-        else:
-            axes = [axes]
-        
-        for i, feature in enumerate(feature_columns):
-            feature_idx = feature_columns.index(feature)
-            
-            if sim_df[feature].nunique() <= 1:
-                axes[i].text(0.5, 0.5, f'{feature}\n(constante)', 
-                           ha='center', va='center', fontsize=12,
-                           transform=axes[i].transAxes,
-                           bbox=dict(boxstyle='round', facecolor='#ecf0f1', alpha=0.8))
-                axes[i].set_title(f'{feature}', fontsize=10, fontweight='bold')
-                axes[i].axis('off')
-                continue
-            
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def clean_select(value, default):
+    if value is None:
+        return default
+
+    value = str(value).strip()
+    if value == "" or value.lower() == "none":
+        return default
+
+    return value
+
+
+def time_to_minutes(value, default):
+    value = clean_select(value, default)
+
+    try:
+        hour, minute = value.split(":")[:2]
+        return int(hour) * 60 + int(minute)
+    except Exception:
+        hour, minute = default.split(":")
+        return int(hour) * 60 + int(minute)
+
+
+def normalize_heavy_plugins(value):
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        return [str(item).strip().lower() for item in value if str(item).strip()]
+
+    return [item.strip().lower() for item in str(value).split(",") if item.strip()]
+
+
+def normalize_params(params):
+    normalized = {
+        "visitors_per_day": params.get("visitors_per_day"),
+        "pageviews_per_day": params.get("pageviews_per_day"),
+        "traffic_growth_rate": params.get("traffic_growth_rate"),
+        "peak_hours_start": params.get("peak_hours_start"),
+        "peak_hours_end": params.get("peak_hours_end"),
+        "cpu_usage_avg": params.get("cpu_usage_avg"),
+        "cpu_usage_peak": params.get("cpu_usage_peak"),
+        "ram_usage_avg": params.get("ram_usage_avg"),
+        "ram_usage_max": params.get("ram_usage_max"),
+        "disk_usage_avg": params.get("disk_usage_avg"),
+        "disk_usage_max": params.get("disk_usage_max"),
+        "response_time": params.get("response_time"),
+        "disk_read_iops": params.get("disk_read_iops"),
+        "disk_write_iops": params.get("disk_write_iops"),
+        "plugin_count": params.get("plugin_count"),
+        "heavy_plugins": normalize_heavy_plugins(params.get("heavy_plugins")),
+        "php_version": params.get("php_version"),
+        "cache_enabled": params.get("cache_enabled"),
+        "cdn_enabled": params.get("cdn_enabled"),
+        "wp_type": params.get("wp_type"),
+    }
+    return normalized
+
+
+def build_feature_row(normalized):
+    heavy_plugins = set(normalized["heavy_plugins"])
+
+    row = {
+        "visitors_per_day": normalized["visitors_per_day"],
+        "pageviews_per_day": normalized["pageviews_per_day"],
+        "traffic_growth_rate": normalized["traffic_growth_rate"],
+        "cpu_usage_avg": normalized["cpu_usage_avg"],
+        "cpu_usage_peak": normalized["cpu_usage_peak"],
+        "ram_usage_avg": normalized["ram_usage_avg"],
+        "ram_usage_max": normalized["ram_usage_max"],
+        "disk_usage_avg": normalized["disk_usage_avg"],
+        "disk_usage_max": normalized["disk_usage_max"],
+        "response_time": normalized["response_time"],
+        "disk_read_iops": normalized["disk_read_iops"],
+        "disk_write_iops": normalized["disk_write_iops"],
+        "plugin_count": normalized["plugin_count"],
+        "peak_hours_start_minutes": time_to_minutes(normalized["peak_hours_start"], DEFAULTS["peak_hours_start"]),
+        "peak_hours_end_minutes": time_to_minutes(normalized["peak_hours_end"], DEFAULTS["peak_hours_end"]),
+    }
+
+    row["peak_duration_minutes"] = max(
+        0,
+        row["peak_hours_end_minutes"] - row["peak_hours_start_minutes"],
+    )
+
+    for plugin in HEAVY_PLUGIN_OPTIONS:
+        row[f"heavy_plugin_{plugin}"] = 1 if plugin in heavy_plugins else 0
+
+    for version in PHP_VERSIONS:
+        row[f"php_version_{version}"] = 1 if normalized["php_version"] == version else 0
+
+    for value in ["non", "oui"]:
+        row[f"cache_enabled_{value}"] = 1 if normalized["cache_enabled"] == value else 0
+        row[f"cdn_enabled_{value}"] = 1 if normalized["cdn_enabled"] == value else 0
+
+    for wp_type in WP_TYPES:
+        row[f"wp_type_{wp_type}"] = 1 if normalized["wp_type"] == wp_type else 0
+
+    return row
+
+
+def prepare_features(params, feature_columns):
+    normalized = normalize_params(params)
+    row = build_feature_row(normalized)
+    features = pd.DataFrame([{column: row.get(column, 0) for column in feature_columns}])
+    return features, normalized, row
+
+
+def predict_load(model_load, features_df):
+    prediction = float(model_load.predict(features_df)[0])
+    return min(100.0, max(0.0, prediction))
+
+
+def days_to_months_days(days):
+    """Identique à predict_from_file.py"""
+    if days is None or days >= 30000:
+        return 999, 0, "∞"
+    if days <= 0:
+        return 0, 0, "SATURÉ"
+
+    total_months = days / 30.44
+    months = int(total_months)
+    remaining_days = int(round((total_months - months) * 30.44))
+
+    if remaining_days >= 30:
+        months += 1
+        remaining_days -= 30
+
+    if months == 0:
+        text = f"{remaining_days} jour{'s' if remaining_days > 1 else ''}"
+    elif remaining_days == 0:
+        text = f"{months} mois"
+    else:
+        text = f"{months} mois et {remaining_days} jour{'s' if remaining_days > 1 else ''}"
+
+    return months, remaining_days, text
+
+
+def make_simulated_dataset(base_features, feature_columns, n_samples=300):
+    rng = np.random.default_rng(42)
+    base = base_features.iloc[0].to_dict()
+    rows = []
+
+    binary_prefixes = ("heavy_plugin_", "php_version_", "cache_enabled_", "cdn_enabled_", "wp_type_")
+
+    for _ in range(n_samples):
+        row = {}
+
+        for column in feature_columns:
+            value = base.get(column, 0)
+
+            if column.startswith(binary_prefixes):
+                row[column] = int(value)
+            else:
+                value = float(value)
+                noise = rng.normal(0, max(abs(value) * 0.12, 1.0))
+                row[column] = max(0, value + noise)
+
+        rows.append(row)
+
+    return pd.DataFrame(rows, columns=feature_columns)
+
+
+def label_for(feature):
+    if feature.startswith("heavy_plugin_"):
+        return "Plugin lourd"
+    if feature.startswith("php_version_"):
+        return "Version PHP"
+    if feature.startswith("cache_enabled_"):
+        return "Cache activé"
+    if feature.startswith("cdn_enabled_"):
+        return "CDN activé"
+    if feature.startswith("wp_type_"):
+        return "Pack WordPress"
+
+    return FRENCH_LABELS.get(feature, feature)
+
+
+def graph_partial_dependence(model_load, features_df, feature_columns):
+    try:
+        numeric_features = [
+            feature
+            for feature in feature_columns
+            if not feature.startswith(("heavy_plugin_", "php_version_", "cache_enabled_", "cdn_enabled_", "wp_type_"))
+        ][:20]
+
+        sim_df = make_simulated_dataset(features_df, feature_columns, n_samples=350)
+        n_cols = 4
+        n_rows = math.ceil(len(numeric_features) / n_cols)
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(24, max(6, n_rows * 4.6)))
+        axes = np.array(axes).reshape(-1)
+
+        for index, feature in enumerate(numeric_features):
+            feature_index = feature_columns.index(feature)
+            ax = axes[index]
+
             try:
                 PartialDependenceDisplay.from_estimator(
-                    model_load, 
-                    X_sim, 
-                    features=[feature_idx],
+                    model_load,
+                    sim_df,
+                    features=[feature_index],
                     feature_names=feature_columns,
-                    ax=axes[i],
-                    grid_resolution=50,
-                    kind='average',
-                    line_kw={'color': '#3498db', 'linewidth': 2.5}
+                    grid_resolution=35,
+                    ax=ax,
+                    line_kw={"color": "#2563eb", "linewidth": 2.4},
                 )
-                
-                current_val = features_dict.get(feature, sim_df[feature].median())
-                axes[i].axvline(x=current_val, color='#e74c3c', linestyle='--', 
-                              linewidth=2, alpha=0.7, label=f'Actuel: {current_val:.1f}')
-                
-                y_min, y_max = axes[i].get_ylim()
-                axes[i].fill_between([sim_df[feature].min(), sim_df[feature].max()], 
-                                    y_min, y_max, alpha=0.05, color='#2ecc71')
-                
-                axes[i].set_title(f'{feature}', fontsize=11, fontweight='bold')
-                axes[i].set_xlabel('')
-                axes[i].set_ylabel('Charge (%)' if i % n_cols == 0 else '', fontsize=9)
-                axes[i].legend(fontsize=7, loc='upper right')
-                axes[i].grid(True, alpha=0.3, linestyle='--')
-                axes[i].tick_params(axis='both', labelsize=8)
-                
-            except Exception as e:
-                axes[i].text(0.5, 0.5, f'{feature}\n(erreur PDP)', 
-                           ha='center', va='center', fontsize=10,
-                           transform=axes[i].transAxes, color='red',
-                           bbox=dict(boxstyle='round', facecolor='#ffeaa7', alpha=0.8))
-                axes[i].axis('off')
-        
-        # Masquer les axes inutilisés
-        for j in range(n_features, len(axes)):
-            axes[j].axis('off')
-        
-        plt.suptitle(f'📈 Partial Dependence Plots (PDP)\n'
-                    f'Effet de chaque variable sur la charge prédite ({n_features} variables)',
-                    fontsize=18, fontweight='bold', y=1.01)
-        plt.tight_layout(pad=2.0)
-        
-        path = str(OUTPUT_DIR / f'partial_dependence_all_{TIMESTAMP}.png')
-        plt.savefig(path, dpi=200, bbox_inches='tight', facecolor='white')
+                current_value = float(features_df.iloc[0][feature])
+                ax.axvline(current_value, color="#ef4444", linestyle="--", linewidth=1.8)
+                ax.set_title(label_for(feature), fontsize=11, fontweight="bold")
+                ax.set_xlabel("")
+                ax.set_ylabel("Charge serveur" if index % n_cols == 0 else "")
+                ax.grid(True, alpha=0.25)
+            except Exception as exc:
+                ax.text(0.5, 0.5, f"{label_for(feature)}\nPDP indisponible", ha="center", va="center")
+                ax.set_title(label_for(feature), fontsize=11, fontweight="bold")
+                ax.axis("off")
+                print(f"Erreur PDP {feature}: {exc}", file=sys.stderr)
+
+        for index in range(len(numeric_features), len(axes)):
+            axes[index].axis("off")
+
+        plt.suptitle("Partial Dependence Plot - effet des variables sur la charge serveur", fontsize=18, fontweight="bold")
+        plt.tight_layout(rect=[0, 0, 1, 0.97])
+
+        path = str(OUTPUT_DIR / f"partial_dependence_all_{TIMESTAMP}.png")
+        plt.savefig(path, dpi=180, bbox_inches="tight", facecolor="white")
         plt.close()
-        
-        print(f"✅ PDP toutes variables généré : {path}", file=sys.stderr)
-        print(f"   📊 {n_features} variables visualisées en grille {n_rows}x{n_cols}", file=sys.stderr)
-        
         return path
-        
-    except Exception as e:
-        print(f"⚠️ Erreur PDP : {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc(file=sys.stderr)
+    except Exception as exc:
+        print(f"Erreur PDP: {exc}", file=sys.stderr)
         return None
 
 
-# ============================================================================
-# GRAPHE 2 : RÉSIDUS (Erreurs du modèle)
-# ============================================================================
-def graph_residus(model_load, scaler, features_dict, feature_columns, result):
-    """
-    Graphique des résidus : différence entre valeurs réelles et prédites
-    """
+def graph_residus(model_load, features_df, feature_columns):
     try:
-        np.random.seed(42)
-        n_samples = 200
-        
-        # Générer des données simulées
-        sim_data = []
-        for _ in range(n_samples):
-            sample = {}
-            for key, value in features_dict.items():
-                if value == 'none' or value is None:
-                    value = 0.0
-                try:
-                    v = float(value)
-                except Exception:
-                    v = 0.0
-                if v != 0:
-                    noise = np.random.normal(0, abs(v) * 0.12)
-                    sample[key] = max(0, v + noise)
-                else:
-                    sample[key] = v
-            sim_data.append(sample)
-        
-        sim_df = pd.DataFrame(sim_data)
-        for col in feature_columns:
-            if col not in sim_df.columns:
-                sim_df[col] = 0
-        sim_df = sim_df[feature_columns]
-        
-        # Prédictions
-        if scaler is not None:
-            X_sim = scaler.transform(sim_df)
-        else:
-            X_sim = sim_df.values
-        
-        y_pred = model_load.predict(X_sim)
-        y_pred = np.clip(y_pred, 0, 100)
-        
-        # Simuler valeurs réelles
-        y_real = y_pred + np.random.normal(0, 8, n_samples)
-        y_real = np.clip(y_real, 0, 100)
-        
-        # Calculer les résidus
+        sim_df = make_simulated_dataset(features_df, feature_columns, n_samples=260)
+        y_pred = np.clip(model_load.predict(sim_df), 0, 100)
+
+        rng = np.random.default_rng(42)
+        y_real = np.clip(y_pred + rng.normal(0, 5.5, len(y_pred)), 0, 100)
         residus = y_real - y_pred
-        
-        # Métriques
+
         mae = mean_absolute_error(y_real, y_pred)
         rmse = np.sqrt(mean_squared_error(y_real, y_pred))
         r2 = r2_score(y_real, y_pred)
-        
-        # Créer le graphique
+
         fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-        
-        # Sous-graphique 1 : Résidus vs Prédit
-        ax1 = axes[0, 0]
-        ax1.scatter(y_pred, residus, alpha=0.6, c='#3498db', edgecolors='white', 
-                   linewidth=0.5, s=60, label='Résidus')
-        ax1.axhline(y=0, color='#e74c3c', linestyle='--', linewidth=2, label='Erreur zéro')
-        ax1.axhline(y=mae, color='#f39c12', linestyle=':', linewidth=1.5, label=f'+MAE ({mae:.1f}%)')
-        ax1.axhline(y=-mae, color='#f39c12', linestyle=':', linewidth=1.5, label=f'-MAE ({mae:.1f}%)')
-        ax1.fill_between([0, 100], -mae, mae, alpha=0.1, color='#2ecc71')
-        ax1.set_xlabel('Charge Prédite (%)', fontsize=12, fontweight='bold')
-        ax1.set_ylabel('Résidu (Réel - Prédit) (%)', fontsize=12, fontweight='bold')
-        ax1.set_title('📊 Analyse des Résidus\n(Résidu = Réel - Prédit)', fontsize=14, fontweight='bold')
-        ax1.legend(loc='upper right', fontsize=9)
-        ax1.grid(True, alpha=0.3, linestyle='--')
-        ax1.set_xlim(0, 100)
-        
-        # Sous-graphique 2 : Distribution des résidus
-        ax2 = axes[0, 1]
-        ax2.hist(residus, bins=30, color='#3498db', edgecolor='white', alpha=0.7, density=True)
-        ax2.axvline(x=0, color='#e74c3c', linestyle='--', linewidth=2, label='Erreur zéro')
-        
-        from scipy import stats
-        mu, std = residus.mean(), residus.std()
-        x_range = np.linspace(residus.min(), residus.max(), 100)
-        ax2.plot(x_range, stats.norm.pdf(x_range, mu, std), 'r-', linewidth=2, label=f'Normale (σ={std:.1f})')
-        
-        ax2.set_xlabel('Résidu (%)', fontsize=12, fontweight='bold')
-        ax2.set_ylabel('Densité', fontsize=12, fontweight='bold')
-        ax2.set_title('📈 Distribution des Erreurs', fontsize=14, fontweight='bold')
-        ax2.legend(fontsize=9)
-        ax2.grid(True, alpha=0.3, axis='y')
-        
-        # Sous-graphique 3 : Résidus standardisés
-        ax3 = axes[1, 0]
-        residus_std = residus / std if std > 0 else residus
-        ax3.scatter(y_pred, residus_std, alpha=0.6, c='#2ecc71', edgecolors='white', 
-                   linewidth=0.5, s=60, label='Résidus standardisés')
-        ax3.axhline(y=0, color='#34495e', linestyle='-', linewidth=2)
-        ax3.axhline(y=2, color='#e74c3c', linestyle='--', linewidth=1, label='±2σ (outliers)')
-        ax3.axhline(y=-2, color='#e74c3c', linestyle='--', linewidth=1)
-        ax3.fill_between([0, 100], -2, 2, alpha=0.1, color='#2ecc71')
-        
-        outliers = np.sum(np.abs(residus_std) > 2)
-        ax3.set_xlabel('Charge Prédite (%)', fontsize=12, fontweight='bold')
-        ax3.set_ylabel('Résidu Standardisé', fontsize=12, fontweight='bold')
-        ax3.set_title(f'🎯 Résidus Standardisés\n({outliers} outliers sur {n_samples})', fontsize=14, fontweight='bold')
-        ax3.legend(fontsize=9)
-        ax3.grid(True, alpha=0.3, linestyle='--')
-        
-        # Sous-graphique 4 : Métriques
-        ax4 = axes[1, 1]
-        ax4.axis('off')
-        
-        metrics_text = f"""
-        📊 MÉTRIQUES DE PERFORMANCE
-        
-        ┌─────────────────────────┐
-        │ R² (précision)  : {r2:.3f}   │
-        │ MAE (erreur moy) : {mae:.1f}%  │
-        │ RMSE           : {rmse:.1f}%  │
-        │ Écart-type      : {std:.1f}%  │
-        │ Outliers        : {outliers}/{n_samples} │
-        │ Config actuelle : {result['predicted_load']:.1f}% │
-        └─────────────────────────┘
-        
-        ✅ Erreur symétrique : {'OUI' if abs(mu) < 2 else 'NON'}
-        ✅ Distribution normale : {'OUI' if abs(mu) < 1 else 'NON'}
-        """
-        
-        ax4.text(0.1, 0.5, metrics_text, transform=ax4.transAxes,
-                fontsize=11, fontfamily='monospace', verticalalignment='center',
-                bbox=dict(boxstyle='round', facecolor='#ecf0f1', alpha=0.8))
-        
-        plt.suptitle('🔍 ANALYSE COMPLÈTE DES RÉSIDUS DU MODÈLE XGBOOST', 
-                    fontsize=16, fontweight='bold', y=1.02)
-        plt.tight_layout()
-        
-        path = str(OUTPUT_DIR / f'residus_{TIMESTAMP}.png')
-        plt.savefig(path, dpi=200, bbox_inches='tight', facecolor='white')
-        plt.close()
-        
-        print(f"✅ Résidus généré : {path}", file=sys.stderr)
-        return path
-        
-    except Exception as e:
-        print(f"⚠️ Erreur Résidus : {e}", file=sys.stderr)
-        return None
 
+        axes[0, 0].scatter(y_pred, residus, alpha=0.65, color="#2563eb", edgecolors="white", s=55)
+        axes[0, 0].axhline(0, color="#ef4444", linestyle="--", linewidth=2)
+        axes[0, 0].set_title("Résidus vs charge prédite", fontweight="bold")
+        axes[0, 0].set_xlabel("Charge prédite (%)")
+        axes[0, 0].set_ylabel("Résidu")
+        axes[0, 0].grid(alpha=0.3)
 
-# ============================================================================
-# GRAPHE 3 : COURBE D'APPRENTISSAGE
-# ============================================================================
-def graph_learning_curve(model_load, scaler, features_dict, feature_columns):
-    """Courbe d'apprentissage du modèle"""
-    try:
-        np.random.seed(42)
-        n_samples = 300
-        
-        sim_data = []
-        for _ in range(n_samples):
-            sample = {}
-            for key, value in features_dict.items():
-                if isinstance(value, str):
-                    if value.lower() == "oui":
-                        sample[key] = 1
-                    elif value.lower() == "non":
-                        sample[key] = 0
-                    else:
-                        try:
-                            sample[key] = float(value)
-                        except Exception:
-                            sample[key] = 0.0
-                elif isinstance(value, (int, float)) and value != 0:
-                    sample[key] = max(0, value + np.random.normal(0, abs(value) * 0.15))
-                else:
-                    sample[key] = value
-            sim_data.append(sample)
-        
-        sim_df = pd.DataFrame(sim_data)
-        for col in feature_columns:
-            if col not in sim_df.columns:
-                sim_df[col] = 0.0
-        
-        sim_df = sim_df.applymap(lambda x: 0.0 if x == 'none' or x is None else x)
-        sim_df = sim_df[feature_columns]
-        
-        if scaler is not None:
-            X_all = scaler.transform(sim_df)
-        else:
-            X_all = sim_df.values
-        
-        y_target = model_load.predict(X_all) + np.random.normal(0, 5, n_samples)
-        y_target = np.clip(y_target, 0, 100)
-        
-        train_sizes = np.linspace(0.1, 1.0, 8)
-        train_sizes_abs, train_scores, val_scores = learning_curve(
-            model_load, X_all, y_target,
-            train_sizes=train_sizes, cv=3,
-            scoring='neg_mean_squared_error',
-            n_jobs=-1, shuffle=True, random_state=42
+        axes[0, 1].hist(residus, bins=28, color="#10b981", edgecolor="white", alpha=0.82)
+        axes[0, 1].axvline(0, color="#ef4444", linestyle="--", linewidth=2)
+        axes[0, 1].set_title("Distribution des résidus", fontweight="bold")
+        axes[0, 1].set_xlabel("Résidu")
+        axes[0, 1].grid(axis="y", alpha=0.3)
+
+        axes[1, 0].scatter(y_real, y_pred, alpha=0.65, color="#8b5cf6", edgecolors="white", s=55)
+        axes[1, 0].plot([0, 100], [0, 100], color="#ef4444", linestyle="--", linewidth=2)
+        axes[1, 0].set_title("Charge simulée vs charge prédite", fontweight="bold")
+        axes[1, 0].set_xlabel("Charge simulée (%)")
+        axes[1, 0].set_ylabel("Charge prédite (%)")
+        axes[1, 0].grid(alpha=0.3)
+
+        axes[1, 1].axis("off")
+        axes[1, 1].text(
+            0.08,
+            0.55,
+            f"MAE  : {mae:.2f}\nRMSE : {rmse:.2f}\nR²   : {r2:.3f}\nSamples : {len(y_pred)}",
+            fontsize=16,
+            fontfamily="monospace",
+            bbox=dict(boxstyle="round", facecolor="#f1f5f9", alpha=0.95),
         )
-        
-        train_rmse = np.sqrt(-train_scores.mean(axis=1))
-        val_rmse = np.sqrt(-val_scores.mean(axis=1))
-        
-        fig, ax = plt.subplots(figsize=(12, 8))
-        
-        ax.fill_between(train_sizes_abs, train_rmse - np.sqrt(-train_scores.std(axis=1)),
-                       train_rmse + np.sqrt(-train_scores.std(axis=1)), 
-                       alpha=0.2, color='#3498db')
-        ax.fill_between(train_sizes_abs, val_rmse - np.sqrt(-val_scores.std(axis=1)),
-                       val_rmse + np.sqrt(-val_scores.std(axis=1)),
-                       alpha=0.2, color='#2ecc71')
-        
-        ax.plot(train_sizes_abs, train_rmse, 'o-', color='#3498db', linewidth=2.5,
-               markersize=8, label='Entraînement')
-        ax.plot(train_sizes_abs, val_rmse, 's-', color='#2ecc71', linewidth=2.5,
-               markersize=8, label='Validation')
-        
-        ax.set_xlabel("Taille de l'échantillon", fontsize=12, fontweight='bold')
-        ax.set_ylabel('RMSE (%)', fontsize=12, fontweight='bold')
-        ax.set_title(f'Courbe d\'Apprentissage XGBoost\n({n_samples} échantillons simulés)',
-                    fontsize=14, fontweight='bold')
-        ax.legend(fontsize=11)
-        ax.grid(True, alpha=0.3, linestyle='--')
-        
+
+        plt.suptitle("Analyse des résidus du modèle XGBoost", fontsize=18, fontweight="bold")
         plt.tight_layout()
-        
-        path = str(OUTPUT_DIR / f'learning_curve_{TIMESTAMP}.png')
-        plt.savefig(path, dpi=200, bbox_inches='tight', facecolor='white')
+
+        path = str(OUTPUT_DIR / f"residus_{TIMESTAMP}.png")
+        plt.savefig(path, dpi=180, bbox_inches="tight", facecolor="white")
         plt.close()
-        
-        print(f"✅ Courbe apprentissage : {path}", file=sys.stderr)
         return path
-        
-    except Exception as e:
-        print(f"⚠️ Erreur Courbe apprentissage : {e}", file=sys.stderr)
+    except Exception as exc:
+        print(f"Erreur résidus: {exc}", file=sys.stderr)
         return None
 
 
-# ============================================================================
-# GRAPHE 4 : MATRICE DE CORRÉLATION
-# ============================================================================
-def graph_correlation(features_dict):
-    """Heatmap de corrélation des variables"""
+
+
+def graph_correlation(features_df, feature_columns):
     try:
-        n = 100
-        sim = {}
-        
-        for k, v in features_dict.items():
-            if isinstance(v, (int, float)) and v != 0:
-                sim[k] = np.clip(v + np.random.normal(0, max(abs(v) * 0.15, 1), n), 0, None)
-            else:
-                sim[k] = np.random.uniform(0, 100, n)
-        
-        df = pd.DataFrame(sim)
-        corr = df.corr()
-        
-        fig, ax = plt.subplots(figsize=(28, 24))
-        mask = np.triu(np.ones_like(corr, dtype=bool), k=1)
-        
+        sim_df = make_simulated_dataset(features_df, feature_columns, n_samples=240)
+        numeric_columns = [
+            feature
+            for feature in feature_columns
+            if not feature.startswith(("heavy_plugin_", "php_version_", "cache_enabled_", "cdn_enabled_", "wp_type_"))
+        ][:20]
+
+        corr = sim_df[numeric_columns].corr()
+        labels = [label_for(column) for column in numeric_columns]
+
+        fig, ax = plt.subplots(figsize=(18, 14))
         sns.heatmap(
             corr,
-            mask=mask,
             annot=True,
-            fmt='.2f',
-            cmap='coolwarm',
+            fmt=".2f",
+            cmap="coolwarm",
             center=0,
-            square=True,
-            linewidths=1.5,
+            linewidths=0.8,
+            xticklabels=labels,
+            yticklabels=labels,
             ax=ax,
-            annot_kws={'size': 14, 'weight': 'bold'},
-            cbar_kws={'shrink': 0.8, 'aspect': 30}
+            annot_kws={"size": 9},
         )
-        
-        ax.set_title('🔥 Matrice de Corrélation des Variables', fontsize=22, fontweight='bold', pad=30)
-        plt.xticks(fontsize=14, rotation=45, ha='right', fontweight='bold')
-        plt.yticks(fontsize=14, fontweight='bold')
-        plt.tight_layout(pad=3.0)
-        
-        path = str(OUTPUT_DIR / f'correlation_{TIMESTAMP}.png')
-        plt.savefig(path, dpi=250, bbox_inches='tight')
-        plt.close()
-        
-        print(f"✅ Matrice de corrélation générée : {path}", file=sys.stderr)
-        return path
-        
-    except Exception as e:
-        print(f"⚠️ Erreur Corrélation : {e}", file=sys.stderr)
-        return None
-
-
-# ============================================================================
-# GRAPHE 5 : ARBRE DE DÉCISION PERSONNALISÉ
-# ============================================================================
-def graph_arbre(features_dict, result):
-    """Arbre de décision XGBoost personnalisé avec flèches OUI/NON"""
-    try:
-        fig, ax = plt.subplots(figsize=(22, 14), dpi=150)
-        ax.set_xlim(-1, 15)
-        ax.set_ylim(0, 14)
-        ax.axis('off')
-        ax.set_facecolor('#fdfdfd')
-        
-        # Extraction des données
-        cpu_val = features_dict.get('cpu_usage_avg', 0)
-        ram_val = features_dict.get('ram_usage_avg', 0)
-        vis_val = features_dict.get('visitors_per_day', 0)
-        plug_val = features_dict.get('plugin_count', 0)
-        iops_val = features_dict.get('total_iops', 0)
-        growth_val = features_dict.get('traffic_growth_rate', 0)
-        cache_val = features_dict.get('cache_enabled', 0)
-        
-        # Logique de chemin
-        cpu_ok = cpu_val < 65
-        ram_ok = ram_val < 70
-        vis_ok = vis_val < 15000
-
-        def draw_node(x, y, title, val_str, threshold_str, active):
-            main_color = '#2ecc71' if active else '#3498db'
-            circle = Circle((x, y), 0.75, color=main_color, ec='white', lw=2, zorder=5)
-            ax.add_patch(circle)
-            ax.text(x, y, f"{title}\n{val_str}\n(>{threshold_str}?)", 
-                    ha='center', va='center', fontsize=9, fontweight='bold', 
-                    color='white', zorder=6)
-
-        def draw_arrow(x1, y1, x2, y2, active, label):
-            if label == "OUI":
-                color = '#2ecc71'
-                alpha = 1.0
-                lw = 3.5
-            else:
-                color = '#2ecc71' if active else '#d1d8e0'
-                alpha = 1.0 if active else 0.4
-                lw = 3.5 if active else 1.5
-            
-            dx, dy = x2 - x1, y2 - y1
-            dist = np.sqrt(dx**2 + dy**2)
-            start_ratio = 0.8 / dist
-            end_ratio = 0.9 / dist
-            
-            ax.annotate('', 
-                        xy=(x2 - dx*end_ratio, y2 - dy*end_ratio), 
-                        xytext=(x1 + dx*start_ratio, y1 + dy*start_ratio),
-                        arrowprops=dict(arrowstyle='-|>', color=color, lw=lw, 
-                                      mutation_scale=20, shrinkA=0, shrinkB=0),
-                        zorder=2, alpha=alpha)
-            
-            mx, my = (x1 + x2) / 2, (y1 + y2) / 2
-            ax.text(mx, my, label, fontsize=10, fontweight='bold', color=color,
-                    bbox=dict(boxstyle='round,pad=0.2', fc='white', ec=color, alpha=0.9),
-                    ha='center', va='center', zorder=10)
-
-        # Placement des Nœuds
-        draw_node(7, 11, "CPU", f"{cpu_val:.0f}%", "65", True)
-        draw_node(3.5, 8.5, "RAM", f"{ram_val:.0f}%", "70", cpu_ok)
-        draw_node(10.5, 8.5, "Visiteurs", f"{vis_val:.0f}", "15K", not cpu_ok)
-        draw_node(1.5, 6, "Plugins", f"{plug_val}", "30", cpu_ok and ram_ok)
-        draw_node(5.5, 6, "Cache", "OUI" if cache_val else "NON", "Actif", cpu_ok and not ram_ok)
-        draw_node(9.5, 6, "IOPS", f"{iops_val:.0f}", "1K", not cpu_ok and vis_ok)
-        draw_node(13, 6, "Growth", f"{growth_val:.0f}%", "20", not cpu_ok and not vis_ok)
-
-        # Flèches de décision
-        draw_arrow(7, 11, 3.5, 8.5, cpu_ok, "OUI")
-        draw_arrow(7, 11, 10.5, 8.5, not cpu_ok, "NON")
-        draw_arrow(3.5, 8.5, 1.5, 6, ram_ok, "OUI")
-        draw_arrow(3.5, 8.5, 5.5, 6, not ram_ok, "NON")
-        draw_arrow(10.5, 8.5, 9.5, 6, vis_ok, "OUI")
-        draw_arrow(10.5, 8.5, 13, 6, not vis_ok, "NON")
-
-        # Flèches vers les feuilles
-        draw_arrow(1.5, 6, 0.5, 3, cpu_ok and ram_ok, "OUI")
-        draw_arrow(1.5, 6, 2.5, 3, not (cpu_ok and ram_ok), "NON")
-        draw_arrow(5.5, 6, 4.5, 3, cpu_ok and not ram_ok and cache_val, "OUI")
-        draw_arrow(5.5, 6, 6.5, 3, cpu_ok and not ram_ok and not cache_val, "NON")
-        draw_arrow(9.5, 6, 9.5, 3, not cpu_ok and vis_ok, "OUI")
-        draw_arrow(13, 6, 12.5, 3, not cpu_ok and not vis_ok, "OUI")
-
-        # Feuilles (Résultats Finaux)
-        leaves = [
-            (0.5, 3, 'CRITIQUE', '#b71c1c'),
-            (2.5, 3, 'URGENT', '#e65100'),
-            (4.5, 3, 'SURVEILLANCE', '#b59f00'),
-            (6.5, 3, 'ATTENTION', '#b26a00'),
-            (9.5, 3, 'STABLE', '#1a237e'),
-            (12.5, 3, 'OPTIMAL', '#006400')
-        ]
-        
-        status_map = {'CRITIQUE': 0, 'URGENT': 1, 'SURVEILLANCE': 2, 'ATTENTION': 3, 'OPTIMAL': 5}
-        current_status = result.get('status', 'OPTIMAL')
-        win_idx = status_map.get(current_status, 5)
-        
-        for i, (lx, ly, name, color) in enumerate(leaves):
-            is_winner = (i == win_idx)
-            ec_color = '#90EE90' if is_winner else 'white'
-            lw = 5 if is_winner else 1
-            alpha = 1.0 if is_winner else 0.9
-            
-            rect = FancyBboxPatch((lx-0.8, ly-0.6), 1.6, 1.2, 
-                                  boxstyle="round,pad=0.1", 
-                                  facecolor=color, edgecolor=ec_color, 
-                                  linewidth=lw, alpha=alpha, zorder=4)
-            ax.add_patch(rect)
-            
-            txt = f"{name}\n[CORRECT]" if is_winner else name
-            ax.text(lx, ly, txt, ha='center', va='center', fontsize=9, 
-                    fontweight='bold', color='black', alpha=alpha, zorder=6)
-
-        # Résumé et Titre
-        sat_txt = result.get('saturation_text', 'N/A')
-        summary = (f"⭐ STATUS: {current_status} | Charge: {result['predicted_load']}% | "
-                   f"Confiance: {result['xgboost_score']}% | Saturation: {sat_txt}")
-        
-        ax.text(7, 13, summary, ha='center', va='center', fontsize=12, fontweight='bold',
-                bbox=dict(boxstyle='round4,pad=0.6', fc='#f8f9fa', ec='#90EE90', lw=3))
-        
-        ax.set_title('🌳 ANALYSE DÉCISIONNELLE XGBOOST', fontsize=18, fontweight='bold', pad=20, color='#2c3e50')
-        
+        ax.set_title("Matrice de corrélation des variables", fontsize=18, fontweight="bold", pad=20)
+        plt.xticks(rotation=45, ha="right")
+        plt.yticks(rotation=0)
         plt.tight_layout()
-        
-        path = str(OUTPUT_DIR / f"arbre_{TIMESTAMP}.png")
-        plt.savefig(path, facecolor='#fdfdfd', bbox_inches='tight')
+
+        path = str(OUTPUT_DIR / f"correlation_{TIMESTAMP}.png")
+        plt.savefig(path, dpi=180, bbox_inches="tight", facecolor="white")
         plt.close()
-        
-        print(f"✅ Arbre de décision généré : {path}", file=sys.stderr)
         return path
-        
-    except Exception as e:
-        print(f"⚠️ Erreur Arbre : {e}", file=sys.stderr)
+    except Exception as exc:
+        print(f"Erreur corrélation: {exc}", file=sys.stderr)
         return None
 
 
-# ============================================================================
-# FONCTION PRINCIPALE : GÉNÉRER TOUS LES GRAPHIQUES
-# ============================================================================
+def graph_saturation_evolution(model_load, features_df, normalized, feature_columns):
+    """
+    MODIFIÉ: Utilise LA MÊME LOGIQUE de saturation que predict_from_file.py
+    """
+    try:
+        # Récupérer la charge actuelle avec le modèle (comme predict_from_file.py)
+        current_load = predict_load(model_load, features_df)
+        
+        # Récupérer le taux de croissance (en pourcentage, comme predict_from_file.py)
+        growth_rate_percent = max(0.0, float(normalized["traffic_growth_rate"]))
+        
+        # MÊME LOGIQUE que predict_from_file.py pour calculer la saturation
+        if current_load >= 90:
+            saturation_months_raw = 0.0
+            saturation_days = 0.0
+        elif growth_rate_percent <= 0:
+            saturation_months_raw = 999.0
+            saturation_days = 999.0 * 30.44
+        else:
+            saturation_months_raw = float(
+                np.log(90 / max(1.0, current_load)) / np.log(1 + growth_rate_percent / 100)
+            )
+            saturation_days = max(0.0, saturation_months_raw * 30.44)
+        
+        # Conversion en mois/jours (même fonction que predict_from_file.py)
+        months_sat, days_sat, text_sat = days_to_months_days(saturation_days)
+        
+        # Projection sur 24 mois
+        months_projection = 24
+        months = np.arange(0, months_projection + 1)
+        charges = []
+        
+        # Calcul de la courbe d'évolution avec LA MÊME formule que predict_from_file.py
+        # load * (1 + growth/100)^month
+        current_load_proj = current_load
+        for month in months:
+            charges.append(min(100, current_load_proj))
+            if current_load_proj < 100:
+                # Même formule que predict_from_file.py: load *= (1 + growth/100)
+                current_load_proj *= (1 + growth_rate_percent / 100)
+        
+        charges = np.array(charges)
+        
+        # Trouver le point de saturation sur la courbe
+        saturation_indices = np.where(charges >= SATURATION_LIMIT)[0]
+        
+        if len(saturation_indices) > 0:
+            saturation_month = int(saturation_indices[0])
+        else:
+            saturation_month = None
+        
+        # Création du graphique
+        fig, ax = plt.subplots(figsize=(16, 8))
+        
+        # Courbe bleue d'évolution de la charge
+        ax.plot(months, charges, color="#2563eb", linewidth=3, marker="o", markersize=6, 
+                label="Charge serveur")
+        
+        # Ligne de saturation à 90% (même seuil que predict_from_file.py)
+        ax.axhline(SATURATION_LIMIT, color="#ef4444", linestyle="--", linewidth=2.5, 
+                   label=f"Seuil saturation {SATURATION_LIMIT}%")
+        
+        # Zones colorées
+        ax.fill_between(months, charges, SATURATION_LIMIT, where=charges >= SATURATION_LIMIT, 
+                        color="#ef4444", alpha=0.18)
+        ax.fill_between(months, charges, 0, color="#2563eb", alpha=0.08)
+        
+        # Point de saturation
+        if saturation_month is not None:
+            ax.axvline(saturation_month, color="#f97316", linestyle=":", linewidth=2.5)
+            ax.scatter([saturation_month], [charges[saturation_month]], s=180, 
+                      color="#f97316", edgecolor="white", zorder=5)
+            
+            # Annotation avec les mêmes informations que predict_from_file.py
+            # Afficher uniquement le texte formaté (text_sat) sans doublon
+            ax.text(
+                saturation_month,
+                min(100, charges[saturation_month] + 4),
+                f"Saturation\n{text_sat}",
+                ha="center",
+                fontsize=11,
+                fontweight="bold",
+                bbox=dict(boxstyle="round", facecolor="#fff7ed", edgecolor="#f97316", alpha=0.95),
+            )
+        
+        # Statut cohérent avec build_recommendation de predict_from_file.py
+        if current_load >= 85 or saturation_days <= 30:
+            statut = "CRITIQUE"
+        elif current_load >= 75 or saturation_days <= 60:
+            statut = "URGENT"
+        elif current_load >= 65 or saturation_days <= 180:
+            statut = "SURVEILLANCE"
+        else:
+            statut = "OPTIMAL"
+        
+        # Bloc d'informations de saturation supprimé (plus d'encart ni de texte orange)
+        
+        # Labels des axes (en mois et jours, comme predict_from_file.py)
+        labels = [f"{month} mois\n{int(month * 30.44)} jours" for month in months]
+        
+        ax.set_title("Évolution de la charge serveur jusqu'à saturation", fontsize=17, fontweight="bold")
+        ax.set_xlabel("Temps")
+        ax.set_ylabel("Charge serveur (%)")
+        ax.set_ylim(0, 105)
+        ax.set_xticks(months[::3])
+        ax.set_xticklabels([labels[index] for index in range(0, len(labels), 3)], fontsize=9)
+        ax.grid(alpha=0.3)
+        ax.legend()
+        plt.tight_layout()
+
+        path = str(OUTPUT_DIR / f"saturation_evolution_{TIMESTAMP}.png")
+        plt.savefig(path, dpi=180, bbox_inches="tight", facecolor="white")
+        plt.close()
+        return path
+    except Exception as exc:
+        print(f"Erreur saturation evolution: {exc}", file=sys.stderr)
+        return None
+
+
 def generate_all_graphs():
-    """Génère tous les graphiques d'analyse"""
-    
-    # Chargement du modèle
     model_load, feature_columns, scaler = load_model()
-    
+
     if model_load is None:
         return {
             "status": "error",
-            "message": "Modèle introuvable"
+            "message": f"Modèle introuvable: {MODEL_PATH}",
         }
-    
-    # Colonnes par défaut
-    if feature_columns is None:
-        feature_columns = [
-            'cpu_usage_avg', 'cpu_usage_peak', 'ram_usage_avg', 'ram_usage_max',
-            'disk_usage_avg', 'disk_usage_max', 'iops_read', 'iops_write', 'total_iops',
-            'response_time', 'visitors_per_day', 'pages_per_day', 'traffic_growth_rate',
-            'peak_start_hour', 'peak_end_hour', 'plugin_count', 'heavy_plugins_count',
-            'woocommerce_active', 'elementor_active', 'wpml_active', 'yoast_seo_active',
-            'revslider_active', 'gravity_forms_active', 'php_score', 'cache_enabled',
-            'cdn_enabled', 'wp_factor'
-        ]
-    
-    # Chargement des paramètres
+
+    if not feature_columns:
+        if hasattr(model_load, "feature_names_in_"):
+            feature_columns = list(model_load.feature_names_in_)
+        else:
+            return {
+                "status": "error",
+                "message": "feature_columns introuvable dans model.pkl",
+            }
+
     json_file = find_latest_json()
     if json_file is None:
         return {
             "status": "error",
-            "message": "Aucun fichier JSON trouvé"
+            "message": f"Aucun fichier JSON trouvé dans {DATA_DIR}",
         }
-    
+
     params = load_params(json_file)
-    features_dict = params
-    
-    # Résultat fictif pour les graphiques qui en ont besoin
-    result = {
-        'predicted_load': 65.0,
-        'xgboost_score': 72.0,
-        'saturation_text': '3 mois',
-        'status': 'SURVEILLANCE'
-    }
-    
+    features_df, normalized, raw_row = prepare_features(params, feature_columns)
+    current_load = predict_load(model_load, features_df)
+
     graphs = {}
-    
-    print("\n" + "="*60, file=sys.stderr)
-    print("📊 GÉNÉRATION DE TOUS LES GRAPHIQUES", file=sys.stderr)
-    print("="*60 + "\n", file=sys.stderr)
-    
-    # 1. Partial Dependence Plot
-    print("1/5 - Génération du PDP...", file=sys.stderr)
-    pdp_path = graph_partial_dependence(model_load, scaler, features_dict, feature_columns)
-    if pdp_path:
-        graphs['partial_dependence'] = pdp_path
-    
-    # 2. Résidus
-    print("2/5 - Génération des résidus...", file=sys.stderr)
-    residus_path = graph_residus(model_load, scaler, features_dict, feature_columns, result)
-    if residus_path:
-        graphs['residus'] = residus_path
-    
-    # 3. Courbe d'apprentissage
-    print("3/5 - Génération de la courbe d'apprentissage...", file=sys.stderr)
-    learning_path = graph_learning_curve(model_load, scaler, features_dict, feature_columns)
-    if learning_path:
-        graphs['learning_curve'] = learning_path
-    
-    # 4. Matrice de corrélation
-    print("4/5 - Génération de la matrice de corrélation...", file=sys.stderr)
-    correlation_path = graph_correlation(features_dict)
-    if correlation_path:
-        graphs['correlation'] = correlation_path
-    
-    # 5. Arbre de décision
-    print("5/5 - Génération de l'arbre de décision...", file=sys.stderr)
-    arbre_path = graph_arbre(features_dict, result)
-    if arbre_path:
-        graphs['arbre'] = arbre_path
-    
-    print("\n" + "="*60, file=sys.stderr)
-    print(f"✅ {len(graphs)}/5 graphiques générés avec succès", file=sys.stderr)
-    print("="*60 + "\n", file=sys.stderr)
-    
+    errors = {}
+
+    generators = {
+        "partial_dependence": lambda: graph_partial_dependence(model_load, features_df, feature_columns),
+        "residus": lambda: graph_residus(model_load, features_df, feature_columns),
+        "correlation": lambda: graph_correlation(features_df, feature_columns),
+        "saturation_evolution": lambda: graph_saturation_evolution(model_load, features_df, normalized, feature_columns),
+        "response_time_projection": lambda: graph_response_time_projection(model_load, features_df, normalized, feature_columns),
+    }
+
+    for name, generator in generators.items():
+        try:
+            path = generator()
+            if path:
+                graphs[name] = path
+            else:
+                errors[name] = "Non généré"
+        except Exception as exc:
+            errors[name] = str(exc)
+            print(f"Erreur {name}: {exc}", file=sys.stderr)
+
+    if not graphs:
+        return {
+            "status": "error",
+            "message": "Aucun graphique généré",
+            "errors": errors,
+            "source": str(json_file),
+            "current_load": current_load,
+        }
+
     return {
         "status": "success",
-        "graphs": graphs
+        "message": f"{len(graphs)} graphique(s) généré(s)",
+        "graphs": graphs,
+        "errors": errors,
+        "source": str(json_file),
+        "current_load": round(current_load, 2),
+        "normalized_parameters": normalized,
     }
 
 
-# Exécution
 if __name__ == "__main__":
     result = generate_all_graphs()
     print(json.dumps(result, ensure_ascii=False, indent=2))

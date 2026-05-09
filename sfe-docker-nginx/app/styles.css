@@ -1,38 +1,172 @@
-/* ----- USER INFO BAR ----- */
-.user-info-bar {
+/* ----- BARRE UTILISATEUR FIXE EN HAUT (BLEUE CLAIRE - Version alternative) ----- */
+.top-user-bar {
     position: fixed;
     top: 0;
     right: 0;
     left: var(--sidebar-width);
     height: 56px;
-    display: flex;
-    align-items: flex-start;
-    justify-content: flex-end;
-    z-index: 1100;
-    background: transparent;
-    pointer-events: none;
-}
-.user-info-rect {
-    margin: 12px 32px 0 0;
-    padding: 10px 28px;
-    background: #fff;
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-md);
-    color: var(--primary-dark);
-    font-weight: 600;
-    font-size: 1.08rem;
-    letter-spacing: 0.01em;
+    background: linear-gradient(135deg, #e0f2fe, #f0f9ff);
     display: flex;
     align-items: center;
-    pointer-events: auto;
-    min-width: 220px;
     justify-content: flex-end;
+    padding: 0 35px;
+    z-index: 1500;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    border-bottom: 2px solid #7dd3fc;
 }
-.user-info-rect .user-name {
-    color: var(--primary);
+
+.user-info-display {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255,255,255,0.5);
+    padding: 6px 16px;
+    border-radius: 20px;
+    color: #0369a1;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.user-info-display:hover {
+    background: rgba(255,255,255,0.8);
+    transition: all 0.3s ease;
+}
+
+.user-icon {
+    font-size: 15px;
+    color: #0284c7;
+}
+
+.user-label {
+    color: #0369a1;
+}
+
+.user-name-top {
+    color: #0c4a6e;
     font-weight: 700;
-    margin-left: 8px;
+    background: rgba(255,255,255,0.6);
+    padding: 2px 8px;
+    border-radius: 12px;
 }
+
+.main-content {
+    margin-left: var(--sidebar-width);
+    flex: 1;
+    padding: 80px 40px 36px 40px;
+    min-height: 100vh;
+    max-width: calc(100vw - var(--sidebar-width));
+}
+
+@media (max-width: 768px) {
+    .top-user-bar {
+        left: 0;
+        height: 50px;
+        padding: 0 15px;
+    }
+    
+    .user-info-display {
+        padding: 4px 12px;
+        font-size: 11px;
+    }
+    
+    .user-name-top {
+        padding: 1px 6px;
+    }
+    
+    .main-content {
+        padding: 70px 14px 14px 14px;
+    }
+}
+
+@media (max-width: 768px) {
+    .top-user-bar {
+        left: 0;
+        height: 50px;
+        padding: 0 15px;
+    }
+    
+    .user-info-display {
+        padding: 4px 12px;
+        font-size: 11px;
+    }
+    
+    .user-name-top {
+        padding: 1px 6px;
+    }
+    
+    .main-content {
+        padding: 70px 14px 14px 14px;
+    }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .top-user-bar {
+        height: 50px;
+        padding: 0 15px;
+        margin-bottom: 15px;
+    }
+    
+    .user-info-display {
+        font-size: 11px;
+        gap: 5px;
+    }
+    
+    .user-name-top {
+        padding: 2px 8px;
+    }
+    
+    .main-content {
+        padding: 15px 14px 14px 14px;
+    }
+}
+
+@media (max-width: 768px) {
+    .top-user-bar {
+        left: 0;
+        height: 50px;
+        padding: 0 15px;
+    }
+    
+    .user-info-display {
+        padding: 4px 12px;
+        font-size: 11px;
+    }
+    
+    .user-name-top {
+        padding: 1px 6px;
+    }
+    
+    .main-content {
+        padding: 70px 14px 14px 14px;
+    }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .top-user-bar {
+        top: 10px;
+        right: 15px;
+        left: 15px;
+    }
+    
+    .user-info-display {
+        font-size: 11px;
+    }
+    
+    .user-icon {
+        font-size: 12px;
+    }
+    
+    .user-name-top {
+        font-size: 11px;
+    }
+    
+    .main-content {
+        padding: 70px 14px 14px 14px;
+    }
+}
+
 /* =============================================
    VALA BLEU - DASHBOARD STYLES
    Design System - Inter Font - CSS Grid/Flexbox
@@ -90,6 +224,8 @@ body {
     min-height: 100vh;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
+    margin: 0; /* Important pour éviter les décalages */
+    overflow-x: hidden; /* Empêche le scroll horizontal */
 }
 
 /* ----- SIDEBAR ----- */
@@ -98,7 +234,8 @@ body {
     background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
     color: #fff;
     position: fixed;
-    top: 0; left: 0;
+    top: 0;
+    left: 0;
     height: 100vh;
     display: flex;
     flex-direction: column;
@@ -190,7 +327,7 @@ body {
 .main-content {
     margin-left: var(--sidebar-width);
     flex: 1;
-    padding: 36px 40px;
+    padding: 90px 40px 36px 40px;
     min-height: 100vh;
     max-width: calc(100vw - var(--sidebar-width));
 }
@@ -303,7 +440,7 @@ body {
 /* Le groupe qui contient l'étiquette et les champs */
 .form-group {
     margin-bottom: 20px;
-    width: 100%; /* S'assure que le groupe prend toute la largeur dispo */
+    width: 100%;
 }
 
 /* Le conteneur des deux inputs */
@@ -311,12 +448,12 @@ body {
     display: flex;
     align-items: center;
     gap: 10px;
-    width: 100%; /* Oblige le bloc à s'étirer comme le champ Visiteurs */
+    width: 100%;
 }
 
 /* Les inputs eux-mêmes */
 .custom-input[type="time"] {
-    flex: 1; /* Force les deux inputs à avoir exactement la même largeur */
+    flex: 1;
     padding: 12px 15px;
     border: 1px solid #d1d5db;
     border-radius: 8px;
@@ -624,18 +761,305 @@ label {
 /* ----- RESPONSIVE ----- */
 @media (max-width: 1024px) {
     .sidebar { width: 200px; }
-    .main-content { margin-left: 200px; padding: 24px; }
+    .main-content { margin-left: 200px; padding: 90px 24px 36px 24px; }
     .grid-4 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 }
 
 @media (max-width: 768px) {
-    .sidebar { width: 100%; height: auto; position: fixed; bottom: 0; top: auto; flex-direction: row; overflow-x: auto; padding: 0; }
+    .top-user-bar {
+        height: 50px;
+        padding: 0 15px;
+    }
+    
+    .user-info-display {
+        padding: 6px 16px;
+        font-size: 11px;
+    }
+    
+    .user-icon {
+        font-size: 14px;
+    }
+    
+    .user-name-top {
+        font-size: 12px;
+    }
+    
+    .sidebar { width: 100%; height: auto; position: fixed; bottom: 0; top: auto; flex-direction: row; overflow-x: auto; padding: 0; z-index: 1001; }
     .sidebar-header { display: none; }
     .sidebar-nav { display: flex; flex-direction: row; }
     .menu-item { padding: 10px 14px; white-space: nowrap; border-left: none; border-top: 3px solid transparent; font-size: 11px; }
     .active-menu { border-left: none !important; border-top-color: var(--primary) !important; }
     .logout-link { display: none; }
-    .main-content { margin-left: 0; margin-bottom: 65px; padding: 14px; }
+    .main-content { margin-left: 0; margin-bottom: 65px; padding: 80px 14px 14px 14px; }
     .grid-4, .scores-grid, .images-grid { grid-template-columns: 1fr; }
     .page-header-with-action { flex-direction: column; }
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.spinning-clock {
+    display: inline-block;
+    font-size: 64px;
+    animation: spin 2s linear infinite;
+}
+.images-grid-loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 300px;
+    text-align: center;
+}
+
+.loading-center {
+    text-align: center;
+}
+
+/* Centrage vertical et horizontal du bloc de génération de graphiques */
+#imagesContainer .images-grid.generating {
+  display: flex !important;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 260px;
+  height: 100%;
+  width: 100%;
+}
+#imagesContainer .images-grid.generating img,
+#imagesContainer .images-grid.generating span,
+#imagesContainer .images-grid.generating p {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.toast-notification.toast-visible { display: block; }
+.toast-notification.toast-error { background: var(--danger-gradient); }
+
+.empty-icon img {
+    width: 80px;
+    height: 80px;
+}
+
+.empty-table-cell .empty-icon img {
+    width: 64px;
+    height: 64px;
+}
+
+[hidden] {
+    display: none !important;
+}
+/* ----- HEADER ACTIONS POUR TABLEAUX (boutons à gauche au-dessus) ----- */
+.table-header-action {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid var(--gray-200);
+    display: flex;
+    justify-content: flex-start; /* Changé de flex-end à flex-start pour aligner à gauche */
+    align-items: center;
+}
+
+.table-header-action .btn-export-csv,
+.table-header-action .btn-danger {
+    margin-right: auto; /* Changé de margin-left à margin-right */
+    margin-left: 0; /* Ajouté pour s'assurer qu'il est à gauche */
+}
+
+/* Optionnel: si vous voulez plusieurs boutons côte à côte */
+.table-header-action.multiple-buttons {
+    gap: 15px;
+}
+
+.table-header-action.multiple-buttons .btn-export-csv,
+.table-header-action.multiple-buttons .btn-danger {
+    margin-right: 0;
+}
+
+/* Style optionnel pour le conteneur du tableau */
+.config-card {
+    background: #fff;
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--gray-200);
+    display: flex;
+    flex-direction: column;
+}
+
+.table-wrapper {
+    overflow-x: auto;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .table-header-action {
+        margin-bottom: 15px;
+        padding-bottom: 12px;
+    }
+    
+    .table-header-action .btn-export-csv,
+    .table-header-action .btn-danger {
+        width: auto; /* Pour garder la taille normale sur mobile */
+        min-width: 200px;
+    }
+}
+        /* Styles pour le bouton Voir les graphes */
+.btn-voir-graphes {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 24px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    position: sticky;
+    bottom: 20px;
+    margin-top: 30px;
+    width: 100%;
+    justify-content: center;
+}
+
+.btn-voir-graphes:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+}
+
+.btn-voir-graphes:active {
+    transform: translateY(0);
+}
+
+/* Styles pour le bouton Revenir en arrière */
+.btn-revenir {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 24px;
+    background: #ef4444;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
+    margin-bottom: 30px;
+    position: sticky;
+    top: 20px;
+    z-index: 10;
+}
+
+.btn-revenir:hover {
+    background: #dc2626;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(239, 68, 68, 0.6);
+}
+
+.btn-revenir:active {
+    transform: translateY(0);
+}
+
+/* Section des graphes */
+.graphes-section {
+    display: none;
+}
+
+.graphes-section.active {
+    display: block;
+}
+
+/* Animation de transition */
+.fade-in {
+    animation: fadeIn 0.5s ease-in;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Styles pour les graphiques */
+.graphique-card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.graphique-card h4 {
+    color: #374151;
+    margin-bottom: 15px;
+    font-size: 18px;
+}
+
+.tree-link-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 15px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    transition: all 0.3s ease;
+    text-decoration: none;
+    color: #374151;
+}
+
+.tree-link-item:hover {
+    background: #f3f4f6;
+    border-color: #667eea;
+    transform: translateX(5px);
+}
+
+.tree-link-item .icon {
+    font-size: 24px;
+}
+
+.tree-link-item .info {
+    flex: 1;
+}
+
+.tree-link-item .info strong {
+    display: block;
+    margin-bottom: 5px;
+}
+
+.tree-link-item .info small {
+    color: #6b7280;
+}
+
+.tree-link-item .download-icon {
+    font-size: 20px;
+}
+
+.generation-status {
+    padding: 15px;
+    background: #f9fafb;
+    border-radius: 8px;
+    margin-bottom: 15px;
+}
+
+.resultats-content {
+    display: block;
+}
+
+.resultats-content.hidden {
+    display: none;
 }
