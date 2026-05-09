@@ -1,3 +1,267 @@
+def graph_charge_horaire(normalized):
+    """
+    Graphe 1: Courbe de charge horaire sur la journée
+    Utilise les paramètres: peak_hours_start, peak_hours_end, cpu_usage_avg, cpu_usage_peak
+    """
+    try:
+        # Récupérer les paramètres
+        peak_start = str(normalized.get("peak_hours_start", DEFAULTS["peak_hours_start"]))
+        peak_end = str(normalized.get("peak_hours_end", DEFAULTS["peak_hours_end"]))
+        cpu_avg = float(normalized.get("cpu_usage_avg", DEFAULTS["cpu_usage_avg"]))
+        cpu_peak = float(normalized.get("cpu_usage_peak", DEFAULTS["cpu_usage_peak"]))
+        # Convertir les heures en minutes
+        start_minutes = time_to_minutes(peak_start, DEFAULTS["peak_hours_start"])
+        end_minutes = time_to_minutes(peak_end, DEFAULTS["peak_hours_end"])
+        # Créer les points pour chaque heure de la journée (0h à 23h)
+        hours = np.arange(0, 24)
+        hourly_load = []
+        for hour in hours:
+            hour_minutes = hour * 60
+            # Vérifier si l'heure est dans la plage de pointe
+            if start_minutes <= end_minutes:
+                # Plage normale (ex: 09:00 à 18:00)
+                if start_minutes <= hour_minutes < end_minutes:
+                    hourly_load.append(cpu_peak)
+                else:
+                    hourly_load.append(cpu_avg)
+            else:
+                # Plage qui traverse minuit (ex: 22:00 à 06:00)
+                if hour_minutes >= start_minutes or hour_minutes < end_minutes:
+                    hourly_load.append(cpu_peak)
+                else:
+                    hourly_load.append(cpu_avg)
+        # Créer le graphique
+        fig, ax = plt.subplots(figsize=(14, 7))
+        # Courbe de charge
+        ax.plot(hours, hourly_load, color="#2563eb", linewidth=2.5, marker='o', markersize=8,
+                label='Charge CPU estimée')
+        # Zone de pointe
+        start_hour = start_minutes / 60
+        end_hour = end_minutes / 60
+        if start_hour < end_hour:
+            ax.axvspan(start_hour, end_hour, alpha=0.15, color='#ef4444', label='Heures de pointe')
+        else:
+            ax.axvspan(start_hour, 24, alpha=0.15, color='#ef4444', label='Heures de pointe')
+            ax.axvspan(0, end_hour, alpha=0.15, color='#ef4444')
+        # Lignes de référence
+        ax.axhline(y=cpu_avg, color='#10b981', linestyle='--', linewidth=1.5, alpha=0.7,
+                   label=f'Charge moyenne ({cpu_avg}%)')
+        ax.axhline(y=cpu_peak, color='#ef4444', linestyle='--', linewidth=1.5, alpha=0.7,
+                   label=f'Charge pic ({cpu_peak}%)')
+        # Annotations
+        if start_hour < end_hour:
+            mid_peak = start_hour + (end_hour - start_hour) / 2
+        else:
+            mid_peak = (start_hour + 24 + end_hour) / 2
+            if mid_peak > 24:
+                mid_peak -= 24
+        ax.text(mid_peak, cpu_peak + 1,
+                f'Période de pointe\n{peak_start} - {peak_end}',
+                ha='center', fontsize=9, fontweight='bold',
+                bbox=dict(boxstyle='round', facecolor='#fee2e2', alpha=0.8))
+        ax.set_xlabel('Heure de la journée', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Charge CPU (%)', fontsize=12, fontweight='bold')
+        ax.set_title('Charge CPU horaire estimée sur 24h', fontsize=14, fontweight='bold')
+        ax.set_xticks(hours)
+        ax.set_xticklabels([f'{h:02d}h' for h in hours], rotation=45)
+        ax.set_xlim(0, 23)
+        ax.set_ylim(0, max(cpu_peak + 15, 100))
+        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.legend(loc='upper right', fontsize=9)
+        # Ajouter des informations
+        info_text = (
+            f"Pic: {peak_start} - {peak_end}\n"
+            f"CPU moyen: {cpu_avg}%\n"
+            f"CPU pic: {cpu_peak}%\n"
+            f"Différence: {cpu_peak - cpu_avg:.1f}%"
+        )
+        ax.text(0.02, 0.98, info_text, transform=ax.transAxes, fontsize=10,
+                verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        plt.tight_layout()
+        path = str(OUTPUT_DIR / f"charge_horaire_{TIMESTAMP}.png")
+        plt.savefig(path, dpi=180, bbox_inches="tight", facecolor="white")
+        plt.close()
+        return path
+    except Exception as exc:
+        print(f"Erreur charge horaire: {exc}", file=sys.stderr)
+        return None
+
+
+def generate_all_graphs():
+    model_load, feature_columns, scaler = load_model()
+
+    if model_load is None:
+        return {
+            "status": "error",
+            "message": f"Modèle introuvable: {MODEL_PATH}",
+        }
+
+    if not feature_columns:
+        if hasattr(model_load, "feature_names_in_"):
+            feature_columns = list(model_load.feature_names_in_)
+        else:
+            return {
+                "status": "error",
+                "message": "feature_columns introuvable dans model.pkl",
+            }
+
+    json_file = find_latest_json()
+    if json_file is None:
+        return {
+            "status": "error",
+            "message": f"Aucun fichier JSON trouvé dans {DATA_DIR}",
+        }
+
+    params = load_params(json_file)
+    features_df, normalized, raw_row = prepare_features(params, feature_columns)
+    current_load = predict_load(model_load, features_df)
+
+    graphs = {}
+    errors = {}
+
+    generators = {
+        # Graphiques existants (dépendants du modèle)
+        "partial_dependence": lambda: graph_partial_dependence(model_load, features_df, feature_columns),
+        "saturation_evolution": lambda: graph_saturation_evolution(model_load, features_df, normalized, feature_columns),
+        # NOUVEAUX GRAPHIQUES (indépendants du modèle, basés uniquement sur les paramètres)
+        "charge_horaire": lambda: graph_charge_horaire(normalized),
+        "charge_par_type_site": lambda: graph_charge_par_type_site(model_load, features_df, normalized, feature_columns),
+    }
+
+
+# Nouveau graphe : charge par type de site WordPress
+def graph_charge_par_type_site(model_load, features_df, normalized, feature_columns):
+    """
+    Graphe: Répartition de la charge serveur selon le type de site WordPress
+    Montre l'impact du type de site (small, medium, performance) sur la charge serveur prédite
+    """
+    try:
+        # Récupérer les paramètres actuels
+        current_wp_type = str(normalized.get("wp_type", DEFAULTS["wp_type"]))
+        # Créer les variantes pour chaque type de site
+        wp_types = ["small", "medium", "performance"]
+        type_labels = ["Small", "Medium", "Performance"]
+        colors = ['#10b981', '#f59e0b', '#ef4444']
+        predicted_loads = []
+        details = []
+        for idx, wp_type in enumerate(wp_types):
+            features_copy = features_df.copy()
+            for col in feature_columns:
+                if col.startswith("wp_type_"):
+                    if col == f"wp_type_{wp_type}":
+                        features_copy[col] = 1
+                    else:
+                        features_copy[col] = 0
+            predicted_load = predict_load(model_load, features_copy)
+            predicted_loads.append(predicted_load)
+            growth_rate = max(0.0, float(normalized["traffic_growth_rate"]))
+            if predicted_load >= 90:
+                saturation_months = 0.0
+                saturation_days = 0.0
+            elif growth_rate <= 0:
+                saturation_months = 999.0
+                saturation_days = 999.0 * 30.44
+            else:
+                saturation_months = float(
+                    np.log(90 / max(1.0, predicted_load)) / np.log(1 + growth_rate / 100)
+                )
+                saturation_days = max(0.0, saturation_months * 30.44)
+            if predicted_load >= 85 or saturation_days <= 30:
+                statut = "CRITIQUE"
+            elif predicted_load >= 75 or saturation_days <= 60:
+                statut = "URGENT"
+            elif predicted_load >= 65 or saturation_days <= 180:
+                statut = "SURVEILLANCE"
+            else:
+                statut = "OPTIMAL"
+            months, days, text = days_to_months_days(saturation_days)
+            details.append({
+                "type": wp_type,
+                "label": type_labels[idx],
+                "predicted_load": predicted_load,
+                "saturation_text": text,
+                "saturation_days": saturation_days,
+                "statut": statut
+            })
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
+        bars = ax1.bar(type_labels, predicted_loads, color=colors, alpha=0.85, edgecolor='white', linewidth=2)
+        for bar, load, detail in zip(bars, predicted_loads, details):
+            height = bar.get_height()
+            ax1.text(bar.get_x() + bar.get_width()/2., height + 0.5,
+                    f'{load:.1f}%\n({detail["statut"]})',
+                    ha='center', va='bottom', fontweight='bold', fontsize=10,
+                    color='black')
+        ax1.axhline(y=90, color='red', linestyle='--', linewidth=1.5, alpha=0.7, label='Saturation (90%)')
+        ax1.axhline(y=85, color='orange', linestyle=':', linewidth=1.5, alpha=0.5, label='Critique (85%)')
+        ax1.axhline(y=75, color='gold', linestyle=':', linewidth=1.5, alpha=0.5, label='Urgent (75%)')
+        ax1.axhline(y=65, color='green', linestyle=':', linewidth=1.5, alpha=0.5, label='Surveillance (65%)')
+        current_index = wp_types.index(current_wp_type) if current_wp_type in wp_types else 1
+        bars[current_index].set_edgecolor('black')
+        bars[current_index].set_linewidth(3)
+        ax1.set_ylabel('Charge serveur prédite (%)', fontsize=12, fontweight='bold')
+        ax1.set_title('Charge serveur par type de site WordPress', fontsize=14, fontweight='bold')
+        ax1.set_ylim(0, max(max(predicted_loads) + 15, 105))
+        ax1.grid(axis='y', alpha=0.3, linestyle='--')
+        ax1.legend(fontsize=9)
+        ax2.axis('off')
+        ax2.text(0.5, 0.95, 'Détails par type de site', ha='center', fontsize=14, fontweight='bold',
+                transform=ax2.transAxes)
+        headers = ['Type', 'Charge', 'Saturation', 'Statut']
+        col_widths = [0.25, 0.25, 0.25, 0.25]
+        for i, (header, width) in enumerate(zip(headers, col_widths)):
+            ax2.text(i/4 + 0.05, 0.85, header, fontweight='bold', fontsize=11,
+                    bbox=dict(boxstyle='round', facecolor='#e5e7eb'))
+        for row_idx, detail in enumerate(details):
+            y_pos = 0.75 - (row_idx * 0.12)
+            if detail["type"] == current_wp_type:
+                ax2.axhline(y=y_pos - 0.02, xmin=0, xmax=1, color='#2563eb', alpha=0.1, linewidth=25)
+            cell_data = [
+                detail["label"],
+                f"{detail['predicted_load']:.1f}%",
+                detail["saturation_text"],
+                detail["statut"]
+            ]
+            for col_idx, (data, width) in enumerate(zip(cell_data, col_widths)):
+                if col_idx == 3:
+                    if detail["statut"] == "CRITIQUE":
+                        color = '#ef4444'
+                    elif detail["statut"] == "URGENT":
+                        color = '#f97316'
+                    elif detail["statut"] == "SURVEILLANCE":
+                        color = '#eab308'
+                    else:
+                        color = '#10b981'
+                    ax2.text(col_idx/4 + 0.05, y_pos, data, fontsize=10, fontweight='bold',
+                            color=color, bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+                else:
+                    ax2.text(col_idx/4 + 0.05, y_pos, data, fontsize=10,
+                            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        ax2.text(0.5, 0.08, f'Type actuel: {current_wp_type.upper()} (surligné en bleu)',
+                ha='center', fontsize=10, fontweight='bold',
+                bbox=dict(boxstyle='round', facecolor='#dbeafe', alpha=0.8),
+                transform=ax2.transAxes)
+        fig.suptitle('Impact du type de site WordPress sur la charge serveur',
+                     fontsize=16, fontweight='bold', y=1.02)
+        current_detail = details[current_index] if current_index < len(details) else details[1]
+        info_text = (
+            f"Type actuel: {current_detail['label']}\n"
+            f"Charge: {current_detail['predicted_load']:.1f}%\n"
+            f"Saturation: {current_detail['saturation_text']}\n"
+            f"Statut: {current_detail['statut']}"
+        )
+        fig.text(0.5, -0.05, info_text, ha='center', fontsize=10,
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        plt.tight_layout()
+        path = str(OUTPUT_DIR / f"charge_par_type_{TIMESTAMP}.png")
+        plt.savefig(path, dpi=180, bbox_inches="tight", facecolor="white")
+        plt.close()
+        return path
+    except Exception as exc:
+        print(f"Erreur charge par type: {exc}", file=sys.stderr)
+        return None
+
+    # ...existing code...
 def graph_response_time_projection(model_load, features_df, normalized, feature_columns):
     """
     Projection dynamique du temps de réponse serveur sur 24 mois selon tous les paramètres du JSON.
@@ -55,10 +319,7 @@ import pandas as pd
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.inspection import PartialDependenceDisplay
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import learning_curve
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -412,102 +673,10 @@ def graph_partial_dependence(model_load, features_df, feature_columns):
         return None
 
 
-def graph_residus(model_load, features_df, feature_columns):
-    try:
-        sim_df = make_simulated_dataset(features_df, feature_columns, n_samples=260)
-        y_pred = np.clip(model_load.predict(sim_df), 0, 100)
-
-        rng = np.random.default_rng(42)
-        y_real = np.clip(y_pred + rng.normal(0, 5.5, len(y_pred)), 0, 100)
-        residus = y_real - y_pred
-
-        mae = mean_absolute_error(y_real, y_pred)
-        rmse = np.sqrt(mean_squared_error(y_real, y_pred))
-        r2 = r2_score(y_real, y_pred)
-
-        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-
-        axes[0, 0].scatter(y_pred, residus, alpha=0.65, color="#2563eb", edgecolors="white", s=55)
-        axes[0, 0].axhline(0, color="#ef4444", linestyle="--", linewidth=2)
-        axes[0, 0].set_title("Résidus vs charge prédite", fontweight="bold")
-        axes[0, 0].set_xlabel("Charge prédite (%)")
-        axes[0, 0].set_ylabel("Résidu")
-        axes[0, 0].grid(alpha=0.3)
-
-        axes[0, 1].hist(residus, bins=28, color="#10b981", edgecolor="white", alpha=0.82)
-        axes[0, 1].axvline(0, color="#ef4444", linestyle="--", linewidth=2)
-        axes[0, 1].set_title("Distribution des résidus", fontweight="bold")
-        axes[0, 1].set_xlabel("Résidu")
-        axes[0, 1].grid(axis="y", alpha=0.3)
-
-        axes[1, 0].scatter(y_real, y_pred, alpha=0.65, color="#8b5cf6", edgecolors="white", s=55)
-        axes[1, 0].plot([0, 100], [0, 100], color="#ef4444", linestyle="--", linewidth=2)
-        axes[1, 0].set_title("Charge simulée vs charge prédite", fontweight="bold")
-        axes[1, 0].set_xlabel("Charge simulée (%)")
-        axes[1, 0].set_ylabel("Charge prédite (%)")
-        axes[1, 0].grid(alpha=0.3)
-
-        axes[1, 1].axis("off")
-        axes[1, 1].text(
-            0.08,
-            0.55,
-            f"MAE  : {mae:.2f}\nRMSE : {rmse:.2f}\nR²   : {r2:.3f}\nSamples : {len(y_pred)}",
-            fontsize=16,
-            fontfamily="monospace",
-            bbox=dict(boxstyle="round", facecolor="#f1f5f9", alpha=0.95),
-        )
-
-        plt.suptitle("Analyse des résidus du modèle XGBoost", fontsize=18, fontweight="bold")
-        plt.tight_layout()
-
-        path = str(OUTPUT_DIR / f"residus_{TIMESTAMP}.png")
-        plt.savefig(path, dpi=180, bbox_inches="tight", facecolor="white")
-        plt.close()
-        return path
-    except Exception as exc:
-        print(f"Erreur résidus: {exc}", file=sys.stderr)
-        return None
 
 
 
 
-def graph_correlation(features_df, feature_columns):
-    try:
-        sim_df = make_simulated_dataset(features_df, feature_columns, n_samples=240)
-        numeric_columns = [
-            feature
-            for feature in feature_columns
-            if not feature.startswith(("heavy_plugin_", "php_version_", "cache_enabled_", "cdn_enabled_", "wp_type_"))
-        ][:20]
-
-        corr = sim_df[numeric_columns].corr()
-        labels = [label_for(column) for column in numeric_columns]
-
-        fig, ax = plt.subplots(figsize=(18, 14))
-        sns.heatmap(
-            corr,
-            annot=True,
-            fmt=".2f",
-            cmap="coolwarm",
-            center=0,
-            linewidths=0.8,
-            xticklabels=labels,
-            yticklabels=labels,
-            ax=ax,
-            annot_kws={"size": 9},
-        )
-        ax.set_title("Matrice de corrélation des variables", fontsize=18, fontweight="bold", pad=20)
-        plt.xticks(rotation=45, ha="right")
-        plt.yticks(rotation=0)
-        plt.tight_layout()
-
-        path = str(OUTPUT_DIR / f"correlation_{TIMESTAMP}.png")
-        plt.savefig(path, dpi=180, bbox_inches="tight", facecolor="white")
-        plt.close()
-        return path
-    except Exception as exc:
-        print(f"Erreur corrélation: {exc}", file=sys.stderr)
-        return None
 
 
 def graph_saturation_evolution(model_load, features_df, normalized, feature_columns):
@@ -617,7 +786,7 @@ def graph_saturation_evolution(model_load, features_df, normalized, feature_colu
         ax.set_xticks(months[::3])
         ax.set_xticklabels([labels[index] for index in range(0, len(labels), 3)], fontsize=9)
         ax.grid(alpha=0.3)
-        ax.legend()
+        ax.legend(loc='lower right')
         plt.tight_layout()
 
         path = str(OUTPUT_DIR / f"saturation_evolution_{TIMESTAMP}.png")
@@ -663,10 +832,11 @@ def generate_all_graphs():
 
     generators = {
         "partial_dependence": lambda: graph_partial_dependence(model_load, features_df, feature_columns),
-        "residus": lambda: graph_residus(model_load, features_df, feature_columns),
-        "correlation": lambda: graph_correlation(features_df, feature_columns),
         "saturation_evolution": lambda: graph_saturation_evolution(model_load, features_df, normalized, feature_columns),
         "response_time_projection": lambda: graph_response_time_projection(model_load, features_df, normalized, feature_columns),
+        # NOUVEAUX GRAPHIQUES (indépendants du modèle, basés uniquement sur les paramètres)
+        "charge_horaire": lambda: graph_charge_horaire(normalized),
+        "charge_par_type_site": lambda: graph_charge_par_type_site(model_load, features_df, normalized, feature_columns),
     }
 
     for name, generator in generators.items():

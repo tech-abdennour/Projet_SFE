@@ -104,10 +104,12 @@
 <div class="card" id="treeDownloads" style="display:block;">
     <h3>🌳 Téléchargement des arbres XGBoost</h3>
     <div class="tree-links" style="display: flex; flex-wrap: wrap; gap: 18px 22px; align-items: center;">
-        <a href="http://localhost:8000/download/graphe/tree0" class="tree-link" download>📥 Tree 0</a>
-        <a href="http://localhost:8000/download/graphe/treefinal" class="tree-link" download>📥 Tree Final</a>
-        <a href="http://localhost:8000/download/graphe/learning_curve" class="tree-link" download>📈 Courbe d'apprentissage</a>
-        <a href="http://localhost:8000/download/graphe/feature_importance" class="tree-link" download>📥 Feature Importance</a>
+        <a href="http://localhost:8000/api/download/graphe/tree0" class="tree-link" download>📥 Tree 0</a>
+        <a href="http://localhost:8000/api/download/graphe/treefinal" class="tree-link" download>📥 Tree Final</a>
+        <a href="http://localhost:8000/api/download/graphe/learning_curve" class="tree-link" download>📈 Courbe d'apprentissage</a>
+        <a href="http://localhost:8000/api/download/graphe/feature_importance" class="tree-link" download>📥 Feature Importance</a>
+        <a href="http://localhost:8000/api/download/graphe/residus" class="tree-link" download>📉 Résidus</a>
+        <a href="http://localhost:8000/api/download/graphe/correlation" class="tree-link" download>🔗 Corrélation</a>
     </div>
 </div>
 
@@ -123,10 +125,10 @@ document.addEventListener('DOMContentLoaded', function() {
     btn.onclick = function() {
         var prediction = null;
         try {
-            prediction = JSON.parse(sessionStorage.getItem('lastPrediction'));
+            prediction = JSON.parse(localStorage.getItem('lastPrediction'));
         } catch(e) {}
         
-        if (prediction && prediction.xgboost_score && prediction.recommendation) {
+        if (prediction && typeof prediction.predicted_load === 'number' && typeof prediction.capacity_margin === 'number') {
             toast.style.display = 'none';
             runGrapheXGBoostModel();
         } else {
@@ -148,16 +150,27 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Fonction pour charger les images existantes sans en supprimer
 function chargerImagesExistantes() {
-    fetch('http://localhost:8000/get-images-list')
+    fetch('http://localhost:8000/api/get-images-list')
         .then(function(r) { return r.json(); })
         .then(function(data) {
+            var noGraphMsg = document.getElementById('noGraphMessage');
             if (data.images && data.images.length > 0) {
                 afficherGraphiques(data.images);
-                document.getElementById('noGraphMessage').style.display = 'none';
+                if (noGraphMsg) noGraphMsg.style.display = 'none';
+            } else {
+                document.getElementById('imagesDisplay').innerHTML = '<div style="text-align:center;padding:40px;color:#888;"><p style="font-size:18px;">Aucun graphique généré</p></div>';
+                if (noGraphMsg) noGraphMsg.style.display = 'block';
             }
         })
         .catch(function(e) {
-            console.log('[Graphe] Aucune image existante à charger');
+            document.getElementById('imagesDisplay').innerHTML = '<div style="text-align:center;padding:40px;color:#888;"><p style="font-size:18px;">Erreur de connexion</p></div>';
+            var noGraphMsg = document.getElementById('noGraphMessage');
+            if (noGraphMsg) noGraphMsg.style.display = 'block';
+            var btn = document.getElementById('runGrapheXGBoostBtn');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<span>📈</span> Crée Graphes';
+            }
         });
 }
 
@@ -175,39 +188,40 @@ function runGrapheXGBoostModel() {
 
     console.log('[Graphe] Lancement de la génération des graphiques...');
 
-    // Failsafe timeout: always reset button after 10s
+    // Failsafe timeout: always reset button after 50s
     var failsafeTimeout = setTimeout(function() {
         btn.disabled = false;
         btn.innerHTML = '<span>📈</span> Crée Graphes';
-        console.warn('[Graphe] Failsafe: bouton réinitialisé après 10s');
-    }, 10000);
+        console.warn('[Graphe] Failsafe: bouton réinitialisé après 35s');
+    }, 35000);
 
-    fetch('http://localhost:8000/run/graphe-xgboost-model', {
-        method: 'POST',
+    fetch('http://localhost:8000/api/run/graphe-xgboost-model', {
+           method: 'POST',
         headers: { 'Content-Type': 'application/json' }
     })
     .then(function(r) { return r.json(); })
     .then(function(res) {
         console.log('[Graphe] Réponse API:', res);
-        if (res.status === 'success') {
-            // Afficher les images générées après un court délai
-            setTimeout(function() {
-                fetch('http://localhost:8000/get-images-list')
-                    .then(function(r) { return r.json(); })
-                    .then(function(data) {
-                        if (data.images && data.images.length > 0) {
-                            afficherGraphiques(data.images);
-                            document.getElementById('noGraphMessage').style.display = 'none';
-                        }
-                        // Remettre le bouton à l'état normal exactement après affichage
-                        setTimeout(function() {
-                            btn.disabled = false;
-                            btn.innerHTML = '<span>📈</span> Crée Graphes';
-                            clearTimeout(failsafeTimeout);
-                        }, 100); // court délai pour garantir l'affichage
-                    });
-            }, 1500);
-        } else {
+        setTimeout(function() {
+            fetch('http://localhost:8000/api/get-images-list')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var noGraphMsg = document.getElementById('noGraphMessage');
+                    if (data.images && data.images.length > 0) {
+                        afficherGraphiques(data.images);
+                        if (noGraphMsg) noGraphMsg.style.display = 'none';
+                    } else {
+                        document.getElementById('imagesDisplay').innerHTML = '<div style="text-align:center;padding:40px;color:#888;"><p style="font-size:18px;">Aucun graphique généré</p></div>';
+                        if (noGraphMsg) noGraphMsg.style.display = 'block';
+                    }
+                    setTimeout(function() {
+                        btn.disabled = false;
+                        btn.innerHTML = '<span>📈</span> Crée Graphes';
+                        clearTimeout(failsafeTimeout);
+                    }, 100);
+                });
+        }, 1500);
+        if (res.status !== 'success') {
             document.getElementById('imagesDisplay').innerHTML = '<div style="text-align:center;padding:40px;color:#888;"><p style="font-size:18px;">Erreur de génération</p><p style="font-size:14px;">Réessayez</p></div>';
             btn.disabled = false;
             btn.innerHTML = '<span>📈</span> Crée Graphes';
@@ -216,7 +230,6 @@ function runGrapheXGBoostModel() {
         }
     })
     .catch(function(e) {
-        console.error('[Graphe] Erreur de connexion à l\'API:', e);
         document.getElementById('imagesDisplay').innerHTML = '<div style="text-align:center;padding:40px;color:#888;"><p style="font-size:18px;">Erreur de connexion</p></div>';
         btn.disabled = false;
         btn.innerHTML = '<span>📈</span> Crée Graphes';
@@ -227,12 +240,14 @@ function runGrapheXGBoostModel() {
 // Fonction d'affichage des graphiques
 function afficherGraphiques(images) {
     var order = [
-        {match: function(img) { return img.filename.startsWith('learning_curve'); }, label: "📈 Courbe d'apprentissage <a href='http://localhost:8000/download/graphe/learning_curve' style='font-size:0.85em;margin-left:8px;text-decoration:underline;color:#0284c7;' download>Télécharger</a>", large: false},
         {match: function(img) { return img.filename.startsWith('partial_dependence_all'); }, label: '📊 Partial Dependence', large: false},
-        {match: function(img) { return img.type === 'residus'; }, label: '📉 Résidus', large: false},
         {match: function(img) { return img.filename.startsWith('response_time_projection'); }, label: '⏱️ Projection Temps de Réponse', large: false},
-        {match: function(img) { return img.type === 'correlation'; }, label: '🔗 Corrélation', large: false},
         {match: function(img) { return img.filename.startsWith('saturation_evolution'); }, label: '⚡ Saturation', large: true},
+        {match: function(img) { return img.filename.startsWith('charge_horaire'); }, label: '🕒 Charge horaire', large: false},
+        {match: function(img) { return img.filename.startsWith('charge_par_type'); }, label: '🏷️ Charge par type de site', large: false},
+        // Ajout d'autres types si besoin
+        {match: function(img) { return img.type === 'residus'; }, label: '📉 Résidus', large: false},
+        {match: function(img) { return img.type === 'correlation'; }, label: '🔗 Corrélation', large: false},
         {match: function(img) { return img.type === 'feature_importance'; }, label: '⭐ Feature Importance', large: false},
         {match: function(img) { return img.type === 'tree'; }, label: '🌳 Arbre XGBoost', large: false}
     ];
