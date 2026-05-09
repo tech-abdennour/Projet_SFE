@@ -1,0 +1,599 @@
+Voici le fichier **README.md** complet du projet VALA BLEU :
+
+```markdown
+# 🚀 VALA BLEU - Analyse Prédictive WordPress
+
+> Système d'analyse prédictive de charge serveur pour sites WordPress avec Machine Learning XGBoost
+
+---
+
+## 📋 Table des Matières
+
+- [Présentation](#-présentation)
+- [Architecture](#-architecture)
+- [Structure des Fichiers](#-structure-des-fichiers)
+- [Installation](#-installation)
+- [Utilisation](#-utilisation)
+- [Base de Données](#-base-de-données)
+- [Modèle XGBoost](#-modèle-xgboost)
+- [API Backend](#-api-backend)
+- [Graphiques](#-graphiques)
+- [Sécurité](#-sécurité)
+- [Dépannage](#-dépannage)
+
+---
+
+## 🎯 Présentation
+
+**VALA BLEU** est une application web complète qui prédit la **charge serveur** d'un site WordPress en fonction de **20 paramètres** (trafic, ressources, configuration). L'outil utilise un modèle **XGBoost** entraîné sur 100 000 échantillons synthétiques.
+
+### Fonctionnalités Principales
+
+- 🔐 Authentification multi-utilisateurs
+- ⚙️ Saisie de 20 paramètres WordPress
+- 🤖 Prédiction XGBoost via API REST
+- 💾 Sauvegarde des analyses en historique
+- 🗑️ Corbeille avec restauration
+- 📊 6 graphiques d'analyse du modèle
+- 📥 Export CSV et JSON
+- 👤 Isolation des données par utilisateur
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    APPLICATION VALA BLEU                     │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌──────────┐    ┌──────────────┐    ┌──────────────────┐  │
+│  │ index.php │───▶│ dashboard.php│───▶│  API Python      │  │
+│  │ (Login)   │    │ (6 onglets)  │    │  localhost:8000  │  │
+│  └──────────┘    └──────────────┘    └──────────────────┘  │
+│                           │                   │              │
+│                           ▼                   ▼              │
+│                    ┌──────────────┐    ┌──────────────┐    │
+│                    │  graphes.php │    │  model.pkl   │    │
+│                    │  (6 graphes) │    │  (XGBoost)   │    │
+│                    └──────────────┘    └──────────────┘    │
+│                           │                                  │
+│                           ▼                                  │
+│                    ┌──────────────┐                         │
+│                    │ vala_bleu.db │                         │
+│                    │  (SQLite)    │                         │
+│                    └──────────────┘                         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 📁 Structure des Fichiers
+
+```
+/var/www/html/                          # Racine web
+├── index.php                           # Page de connexion
+├── dashboard.php                       # Interface principale (6 onglets)
+├── graphes.php                         # Page des graphiques XGBoost
+├── styles.css                          # Feuille de styles
+├── logos.png                           # Favicon
+└── vala_bleu.db                        # Base SQLite
+
+/app/service/                           # Backend Python
+├── train_xgboost_model.py              # Script d'entraînement
+├── api_server.py                       # API FastAPI (port 8000)
+├── models/
+│   ├── model.pkl                       # ⭐ Modèle unique complet
+│   └── model_metrics_all.json          # Métriques JSON
+├── graphe/
+│   ├── tree_0.png                      # Premier arbre XGBoost
+│   ├── tree_final.png                  # Dernier arbre XGBoost
+│   ├── feature_importance_*.png        # Importance des features
+│   ├── residus_*.png                   # Analyse des résidus
+│   ├── correlation_*.png               # Matrice de corrélation
+│   └── learning_curve_*.png            # Courbe d'apprentissage
+└── data/
+    └── training_dataset.csv            # 100 000 échantillons
+```
+
+| Fichier | Rôle | Technologie |
+|---------|------|-------------|
+| **index.php** | Authentification (admin/Ahmed) | PHP 8+ |
+| **dashboard.php** | Interface 6 onglets | PHP + AJAX |
+| **graphes.php** | Visualisation des graphiques | PHP + HTML |
+| **styles.css** | Design responsive | CSS3 |
+| **logos.png** | Icône application | PNG |
+| **vala_bleu.db** | Stockage persistant | SQLite 3 |
+| **model.pkl** | Modèle XGBoost + métriques | Joblib |
+| **api_server.py** | API REST prédiction | FastAPI |
+| **train_xgboost_model.py** | Entraînement du modèle | XGBoost |
+
+---
+
+## 🚀 Installation
+
+### Prérequis
+
+- **PHP 8.0+** avec extensions : `sqlite3`, `curl`, `json`
+- **Python 3.10+** avec packages :
+  ```bash
+  pip install xgboost scikit-learn pandas numpy joblib fastapi uvicorn matplotlib seaborn
+  ```
+- **Serveur web** : Apache/Nginx OU serveur PHP intégré
+- **Port 8000** disponible pour l'API Python
+
+### Étapes d'Installation
+
+#### 1. Cloner le projet
+```bash
+git clone https://github.com/votre-repo/vala-bleu.git
+cd vala-bleu
+```
+
+#### 2. Configurer la racine web
+```bash
+# Option A : Serveur PHP intégré
+cd /var/www/html
+php -S localhost:80
+
+# Option B : Apache/Nginx
+# Pointer le DocumentRoot vers /var/www/html
+```
+
+#### 3. Créer les dossiers backend
+```bash
+mkdir -p /app/service/models
+mkdir -p /app/service/graphe
+mkdir -p /app/service/data
+```
+
+#### 4. Entraîner le modèle XGBoost
+```bash
+cd /app/service
+python3 train_xgboost_model.py
+# Vérifier : ls -lh /app/service/models/model.pkl
+```
+
+#### 5. Lancer l'API Python
+```bash
+cd /app/service
+python3 api_server.py
+# Écoute sur http://localhost:8000
+```
+
+#### 6. Vérifier l'installation
+```bash
+# API en ligne ?
+curl http://localhost:8000/health
+
+# Application web ?
+curl http://localhost/index.php
+```
+
+---
+
+## 📖 Utilisation
+
+### 1. Connexion
+
+Deux comptes prédéfinis :
+
+| Utilisateur | Mot de passe |
+|-------------|--------------|
+| **admin** | `azerty123` |
+| **Ahmed** | `kiritiri` |
+
+Fonctionnalités de connexion :
+- ✅ Session PHP sécurisée
+- ✅ Option "Rester connecté" (cookie 7 jours)
+- ✅ Icône œil pour voir/masquer le mot de passe
+- ✅ Chaque utilisateur voit SES propres données
+
+### 2. Dashboard (6 onglets)
+
+| Onglet | Icône | Fonction |
+|--------|-------|----------|
+| **Paramètres** | ⚙️ | Saisie des 20 paramètres WordPress |
+| **Résultats** | 📊 | Prédictions XGBoost + score |
+| **Sauvegardes** | 💾 | Sauvegarde JSON + historique |
+| **Historique** | 📋 | Liste des analyses passées |
+| **Corbeille** | 🗑️ | Analyses archivées (restaurer/supprimer) |
+| **Graphiques** | 📈 | 6 visualisations du modèle (🆕) |
+
+### 3. Paramètres à saisir
+
+#### 📈 Trafic (4 paramètres)
+- Visiteurs/jour * (50 - 150 000)
+- Pages vues/jour
+- Taux de croissance (%) * (0 - 85%)
+- Pics horaires (début/fin)
+
+#### 🖥️ Ressources Serveur (8 paramètres)
+- CPU moyen * (5 - 100%)
+- CPU max * (8 - 100%)
+- RAM moyenne * (8 - 100%)
+- RAM max * (12 - 100%)
+- Disque occupé (%) (5 - 96%)
+- Disque max / bande passante (%) (8 - 100%)
+- IOPS Read (1 - 3500)
+- IOPS Write (1 - 2800)
+- Temps de réponse (ms)
+
+#### 🔌 WordPress (8 paramètres)
+- Nombre de plugins * (1 - 80)
+- Plugins lourds (7 cases à cocher)
+- Version PHP
+- Cache activé (oui/non)
+- CDN activé (oui/non)
+- Pack WordPress * (SMALL/MEDIUM/PERFORMANCE)
+
+*\* Champs obligatoires*
+
+### 4. Résultats de Prédiction
+
+Après analyse, l'API retourne :
+
+| Champ | Description | Exemple |
+|-------|-------------|---------|
+| `xgboost_score` | Score de confiance (%) | 78.5% |
+| `predicted_load` | Charge prédite (%) | 72.3% |
+| `saturation_months` | Mois avant saturation | 6 mois |
+| `status` | Statut global | SURVEILLANCE |
+| `recommendation` | Conseil textuel | "Activer le cache..." |
+
+**Codes statut :**
+- 🟢 **OPTIMAL** : Charge < 50%
+- 🟡 **SURVEILLANCE** : Charge 50-75%
+- 🔴 **CRITIQUE** : Charge > 75%
+
+---
+
+## 🗄️ Base de Données
+
+**SGBD :** SQLite 3  
+**Fichier :** `/var/www/html/vala_bleu.db`
+
+### Tables
+
+#### 1. `predictions` (Historique des analyses)
+
+| Colonne | Type | Description |
+|---------|------|-------------|
+| `id` | INTEGER PK | Identifiant unique |
+| `user` | TEXT | Nom d'utilisateur |
+| `created_at` | DATETIME | Date de création |
+| `visitors_per_day` | INTEGER | Visiteurs/jour |
+| `cpu_usage_avg` | REAL | CPU moyen |
+| `wp_type` | TEXT | Type WordPress |
+| `predicted_load` | REAL | Charge prédite |
+| `xgboost_score` | REAL | Score XGBoost |
+| `status` | TEXT | Statut (CRITIQUE/SURVEILLANCE/OPTIMAL) |
+| `recommendation` | TEXT | Recommandation |
+| `is_deleted` | INTEGER | 0=actif, 1=corbeille |
+
+#### 2. `deleted_sauvegardes` (Corbeille)
+
+| Colonne | Type | Description |
+|---------|------|-------------|
+| *(mêmes colonnes que predictions)* | | |
+| `deleted_at` | DATETIME | Date d'archivage |
+
+#### 3. `saved_results` (Sauvegardes JSON)
+
+| Colonne | Type | Description |
+|---------|------|-------------|
+| `id` | INTEGER PK | Identifiant |
+| `created_at` | DATETIME | Date de sauvegarde |
+| `data_json` | TEXT | Données au format JSON |
+| `save_type` | TEXT | Type de sauvegarde |
+
+### Requêtes types
+
+```sql
+-- Analyses d'un utilisateur
+SELECT * FROM predictions WHERE user = 'admin' AND is_deleted = 0;
+
+-- Corbeille d'un utilisateur
+SELECT * FROM deleted_sauvegardes WHERE user = 'Ahmed';
+
+-- Vider la corbeille
+DELETE FROM deleted_sauvegardes WHERE user = 'admin';
+```
+
+---
+
+## 🤖 Modèle XGBoost
+
+### Caractéristiques
+
+| Paramètre | Valeur |
+|-----------|--------|
+| **Algorithme** | XGBoost Regressor |
+| **Objectif** | Regression (squarederror) |
+| **Arbres** | 450 estimateurs |
+| **Profondeur max** | 5 |
+| **Learning rate** | 0.045 |
+| **Subsample** | 0.9 |
+| **Colsample** | 0.9 |
+| **Échantillons** | 100 000 |
+| **Split train/test** | 80% / 20% |
+| **Random state** | 42 |
+
+### Top 10 Features (Importance)
+
+| Rang | Feature | Impact | Description |
+|------|---------|--------|-------------|
+| 1 | `visitors_per_day` | ⭐⭐⭐⭐⭐ | Trafic quotidien |
+| 2 | `cpu_usage_avg` | ⭐⭐⭐⭐⭐ | Charge CPU moyenne |
+| 3 | `ram_usage_avg` | ⭐⭐⭐⭐⭐ | RAM utilisée |
+| 4 | `wp_type` | ⭐⭐⭐⭐ | Type de pack |
+| 5 | `traffic_growth_rate` | ⭐⭐⭐⭐ | Croissance trafic |
+| 6 | `cpu_usage_peak` | ⭐⭐⭐⭐ | Pic CPU |
+| 7 | `plugin_count` | ⭐⭐⭐⭐ | Nombre de plugins |
+| 8 | `ram_usage_max` | ⭐⭐⭐⭐ | Pic RAM |
+| 9 | `heavy_plugins` | ⭐⭐⭐⭐ | Plugins lourds |
+| 10 | `cache_enabled` | ⭐⭐⭐⭐ | Cache activé |
+
+### Métriques de Performance
+
+| Métrique | Valeur cible | Description |
+|----------|--------------|-------------|
+| **R²** | > 0.90 | Coefficient de détermination |
+| **RMSE** | < 3.0 | Racine erreur quadratique |
+| **MAE** | < 2.5 | Erreur absolue moyenne |
+| **Accuracy** | > 85% | Précision relative |
+
+### Contenu du model.pkl
+
+```python
+{
+    "model": XGBRegressor(),           # Modèle entraîné
+    "feature_columns": [...],          # 20 colonnes features
+    "target_column": "recommended_capacity_score",
+    "heavy_plugin_options": [...],     # 7 plugins lourds
+    "categorical_options": {...},      # PHP, cache, CDN, wp_type
+    "impact_reference": {...},         # Importance des features
+    "performance_metrics": {           # ⭐ Métriques calculées
+        "r2": 0.95,
+        "rmse": 2.34,
+        "mae": 1.87,
+        "accuracy": 89.5
+    },
+    "metadata": {...}                  # Timestamp, paramètres
+}
+```
+
+---
+
+## 🌐 API Backend
+
+### Endpoints
+
+| Méthode | URL | Description |
+|---------|-----|-------------|
+| **GET** | `/health` | Vérification service |
+| **POST** | `/predict/from-file` | Prédiction depuis JSON |
+| **GET** | `/download/tree0` | Télécharger arbre n°0 |
+| **GET** | `/download/tree-final` | Télécharger dernier arbre |
+| **GET** | `/download/feature-importance` | Télécharger importance |
+| **GET** | `/download/residuals` | Télécharger résidus |
+| **GET** | `/download/correlation` | Télécharger corrélation |
+| **GET** | `/download/learning-curve` | Télécharger courbe apprentissage |
+
+### Exemple de Requête
+
+```bash
+curl -X POST http://localhost:8000/predict/from-file \
+  -H "Content-Type: application/json" \
+  -d '{
+    "visitors_per_day": 50000,
+    "cpu_usage_avg": 72.5,
+    "ram_usage_avg": 68.3,
+    "wp_type": "medium",
+    "php_version": "8.2",
+    "cache_enabled": "oui",
+    "cdn_enabled": "non",
+    "plugin_count": 25,
+    "traffic_growth_rate": 15.0
+  }'
+```
+
+### Exemple de Réponse
+
+```json
+{
+  "xgboost_score": 78.5,
+  "predicted_load": 72.3,
+  "saturation_months": 6,
+  "status": "SURVEILLANCE",
+  "recommendation": "Activer le cache et migrer vers PHP 8.3. Réduire les plugins lourds.",
+  "graphs": {
+    "tree_0": "/download/tree0",
+    "tree_final": "/download/tree-final",
+    "feature_importance": "/download/feature-importance"
+  }
+}
+```
+
+---
+
+## 📊 Graphiques
+
+### Accessibles via
+
+1. **Onglet "Graphiques"** dans le dashboard (`graphes.php`)
+2. **Téléchargement direct** via l'API (`/download/*`)
+
+### 6 Graphiques Disponibles
+
+| Graphique | Description | Utilité |
+|-----------|-------------|---------|
+| 🌳 **Arbre n°0** | Premier arbre de décision | Comprendre la première décision |
+| 🌳 **Dernier arbre** | Arbre final (449ème) | Voir la spécialisation finale |
+| ⭐ **Feature Importance** | Importance des 20 paramètres | Identifier les facteurs clés |
+| 📈 **Résidus** | 4 graphiques d'analyse | Valider la qualité du modèle |
+| 🔗 **Corrélation** | Matrice de corrélation | Détecter les variables liées |
+| 📚 **Apprentissage** | Courbe train/validation | Vérifier overfitting |
+
+### Téléchargement
+
+```bash
+# Arbre n°0
+curl -O http://localhost:8000/download/tree0
+
+# Tous les graphiques (ZIP)
+curl -O http://localhost:8000/download/all-graphs
+```
+
+---
+
+## 🔐 Sécurité
+
+### Mesures Implémentées
+
+| Fonctionnalité | Implémentation |
+|----------------|----------------|
+| **Session PHP** | Obligatoire pour toutes les pages |
+| **Isolation utilisateur** | Chaque user voit SES données (`WHERE user = :user`) |
+| **Requêtes préparées** | Protection injection SQL |
+| **XSS Protection** | `htmlspecialchars()` sur toutes les sorties |
+| **AJAX Protection** | Vérification `HTTP_X_REQUESTED_WITH` |
+| **Mots de passe** | Hashés (à implémenter si nécessaire) |
+| **CORS** | Restreint à l'application locale |
+
+### Bonnes Pratiques
+
+- ✅ Toujours valider les entrées utilisateur
+- ✅ Utiliser `htmlspecialchars()` pour l'affichage
+- ✅ Vérifier la session avant chaque requête
+- ✅ Ne jamais faire confiance aux données client
+- ✅ Logger les actions sensibles
+
+---
+
+## 🔧 Dépannage
+
+### Problèmes Courants
+
+#### 1. L'API ne répond pas
+```bash
+# Vérifier que l'API tourne
+ps aux | grep api_server.py
+curl http://localhost:8000/health
+
+# Redémarrer l'API
+cd /app/service && python3 api_server.py &
+```
+
+#### 2. Le modèle ne se charge pas
+```bash
+# Vérifier que model.pkl existe
+ls -lh /app/service/models/model.pkl
+
+# Régénérer le modèle
+python3 /app/service/train_xgboost_model.py
+```
+
+#### 3. Graphiques manquants
+```bash
+# Vérifier le dossier
+ls -la /app/service/graphe/
+
+# Régénérer les graphiques
+python3 -c "from train_xgboost_model import train_model; train_model()"
+```
+
+#### 4. Erreur SQLite
+```bash
+# Vérifier les permissions
+ls -la /var/www/html/vala_bleu.db
+chmod 666 /var/www/html/vala_bleu.db
+```
+
+#### 5. Session PHP non persistante
+```php
+// Vérifier la configuration PHP
+php -i | grep session.save_path
+// Doit être accessible en écriture
+```
+
+---
+
+## 📈 Évolution Future
+
+### Améliorations Prévues
+
+- [ ] Interface d'administration (gestion utilisateurs)
+- [ ] Plus de types de plugins lourds
+- [ ] Prédiction multi-serveurs
+- [ ] Alertes email automatiques
+- [ ] Dashboard temps réel (WebSocket)
+- [ ] Export PDF des analyses
+- [ ] Comparaison multi-sites
+- [ ] API publique documentée (Swagger)
+- [ ] Tests unitaires (PHPUnit + pytest)
+- [ ] Dockerisation complète
+
+### Mises à Jour du Modèle
+
+- Périodicité : **Mensuelle** ou après **10 000 nouvelles analyses**
+- Réentraînement automatique possible
+- Conservation des anciens modèles (versioning)
+
+---
+
+## 👥 Utilisateurs
+
+| Compte | Mot de passe | Rôle |
+|--------|--------------|------|
+| **admin** | `azerty123` | Administrateur |
+| **Ahmed** | `kiritiri` | Utilisateur standard |
+
+---
+
+## 📝 Licence
+
+Projet interne - Tous droits réservés © 2026
+
+---
+
+## 🆘 Support
+
+En cas de problème :
+
+1. 📋 Vérifier les logs PHP : `/var/log/php_errors.log`
+2. 🐍 Vérifier l'API : `curl http://localhost:8000/health`
+3. 📊 Vérifier les graphiques : `ls /app/service/graphe/`
+4. 🗄️ Vérifier la BDD : `ls -la /var/www/html/vala_bleu.db`
+
+---
+
+## 🎓 Glossaire
+
+| Terme | Définition |
+|-------|------------|
+| **XGBoost** | Algorithme de Machine Learning par gradient boosting |
+| **R²** | Coefficient de détermination (qualité de prédiction) |
+| **RMSE** | Root Mean Squared Error (erreur quadratique moyenne) |
+| **MAE** | Mean Absolute Error (erreur absolue moyenne) |
+| **IOPS** | Input/Output Operations Per Second (disque) |
+| **Feature** | Paramètre d'entrée du modèle |
+| **Target** | Valeur à prédire (charge serveur) |
+| **Overfitting** | Surapprentissage (modèle trop complexe) |
+
+---
+
+<div align="center">
+
+**Développé avec ❤️ pour WordPress**
+
+<img src="logos.png" width="50">
+
+*VALA BLEU - Analyse Prédictive Intelligente*
+
+</div>
+```
+
+---
+
+Ce `README.md` est prêt à être placé à la racine de votre projet. Il couvre tous les aspects : installation, utilisation, architecture, API, graphiques, sécurité et dépannage. Vous pouvez le personnaliser en modifiant les URLs, les identifiants ou en ajoutant votre propre licence.
