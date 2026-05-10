@@ -1,5 +1,7 @@
 <?php
+
 session_start();
+require_once "db_config.php";
 
 // Vérifier si l'utilisateur vient de se déconnecter (paramètre dans l'URL)
 $just_logged_out = isset($_GET['logout']);
@@ -24,11 +26,16 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $password = trim($_POST["password"]);
     $remember = isset($_POST["remember"]);
 
-    if ($username === "admin" && $password === "azerty123" or $username === "Ahmed" && $password === "kiritiri") {
+    // Vérification utilisateur/password depuis la base
+    $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ?");
+    $stmt->execute([$username]);
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    // Pour production, utilisez password_hash/verify
+    if ($user && $user['password'] === $password) {
         $_SESSION["user"] = $username;
 
         if ($remember) {
-            // Cookie valable 7 jours
             setcookie("remember_user", $username, time() + (7 * 24 * 3600), "/");
         }
 

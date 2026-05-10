@@ -266,7 +266,7 @@ def build_recommendation(predicted_load: float, saturation_days: float, saturati
     return "OPTIMAL", "Configuration stable - Aucune action requise"
 
 
-def predict(model: Any, feature_columns: list[str], params: dict[str, Any]) -> dict[str, Any]:
+def predict(model: Any, feature_columns: list[str], params: dict[str, Any], metadata: dict[str, Any] = None) -> dict[str, Any]:
     features, normalized = prepare_features(params, feature_columns)
 
     predicted_load = float(model.predict(features)[0])
@@ -293,22 +293,23 @@ def predict(model: Any, feature_columns: list[str], params: dict[str, Any]) -> d
 
     # Récupérer le vrai score R² du modèle depuis le model.pkl si disponible
     r2_score_model = None
-    # 1. Si model est un dict (cas normal)
-    if isinstance(model, dict) and 'performance_metrics' in model:
-        r2_score_model = model['performance_metrics'].get('r2', None)
-    # 2. Si metadata contient performance_metrics
-    if (r2_score_model is None) and isinstance(feature_columns, dict) and 'performance_metrics' in feature_columns:
-        r2_score_model = feature_columns['performance_metrics'].get('r2', None)
-    # 3. Si metadata (du model.pkl) contient performance_metrics
-    if r2_score_model is None and 'metadata' in locals():
-        metadata_obj = locals().get('metadata', None)
-        if isinstance(metadata_obj, dict) and 'performance_metrics' in metadata_obj:
-            r2_score_model = metadata_obj['performance_metrics'].get('r2', None)
-    # 4. Si model a un attribut performance_metrics (rare)
-    if r2_score_model is None and hasattr(model, 'performance_metrics'):
-        pm = getattr(model, 'performance_metrics', None)
-        if isinstance(pm, dict):
-            r2_score_model = pm.get('r2', None)
+    if metadata and isinstance(metadata, dict) and 'performance_metrics' in metadata:
+        r2_score_model = metadata['performance_metrics'].get('r2', None)
+    if (
+        r2_score_model is None
+        or r2_score_model == ''
+        or r2_score_model == 'null'
+        or (isinstance(r2_score_model, float) and (np.isnan(r2_score_model) or np.isinf(r2_score_model)))
+    ):
+        r2_score_model = "N/A"
+    else:
+        try:
+            if isinstance(r2_score_model, (float, int)):
+                r2_score_model = round(float(r2_score_model), 4)
+            else:
+                r2_score_model = str(r2_score_model)
+        except Exception:
+            r2_score_model = str(r2_score_model)
     return {
         "predicted_load": predicted_load,
         "xgboost_score": r2_score_model,
@@ -376,7 +377,7 @@ def predict_from_json() -> dict[str, Any]:
         }
 
     params = load_params(json_file)
-    result = predict(model, feature_columns, params)
+    result = predict(model, feature_columns, params, metadata)
 
     return {
         "status": "success",

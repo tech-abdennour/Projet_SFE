@@ -2,27 +2,110 @@
 set_time_limit(300);
 session_start();
 date_default_timezone_set('Africa/Casablanca');
+
+// Gestion de la déconnexion
 if (isset($_GET['logout'])) {
     session_destroy();
     setcookie("remember_user", "", time() - 3600, "/");
     header("Location: index.php?logout=1");
     exit;
 }
+
+// Vérification de la session
 if (!isset($_SESSION['user'])) {
     header("Location: index.php");
     exit;
 }
 
+// Initialisation de la base de données
 $db_file = 'vala_bleu.db';
 $pdo = null;
 
 try {
     $pdo = new PDO("sqlite:" . $db_file);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    
+    // Création des tables si elles n'existent pas
+    $pdo->exec("CREATE TABLE IF NOT EXISTS predictions (
+        id TEXT PRIMARY KEY,
+        user TEXT,
+        created_at TEXT,
+        cpu_usage_avg TEXT,
+        cpu_usage_peak TEXT,
+        ram_usage_avg TEXT,
+        ram_usage_max TEXT,
+        disk_usage_avg TEXT,
+        disk_usage_max TEXT,
+        disk_read_iops TEXT,
+        disk_write_iops TEXT,
+        response_time TEXT,
+        visitors_per_day TEXT,
+        pageviews_per_day TEXT,
+        traffic_growth_rate TEXT,
+        peak_hours_start TEXT,
+        peak_hours_end TEXT,
+        peak_hours TEXT,
+        plugin_count TEXT,
+        heavy_plugins TEXT,
+        php_version TEXT,
+        cache_enabled TEXT,
+        cdn_enabled TEXT,
+        wp_type TEXT,
+        predicted_load TEXT,
+        predicted_saturation_months TEXT,
+        capacity_margin TEXT,
+        status TEXT,
+        recommendation TEXT,
+        save_type TEXT,
+        is_deleted INTEGER DEFAULT 0
+    )");
+    
+    $pdo->exec("CREATE TABLE IF NOT EXISTS deleted_sauvegardes (
+        id TEXT PRIMARY KEY,
+        user TEXT,
+        created_at TEXT,
+        deleted_at TEXT,
+        cpu_usage_avg TEXT,
+        cpu_usage_peak TEXT,
+        ram_usage_avg TEXT,
+        ram_usage_max TEXT,
+        disk_usage_avg TEXT,
+        disk_usage_max TEXT,
+        disk_read_iops TEXT,
+        disk_write_iops TEXT,
+        response_time TEXT,
+        visitors_per_day TEXT,
+        pageviews_per_day TEXT,
+        traffic_growth_rate TEXT,
+        peak_hours_start TEXT,
+        peak_hours_end TEXT,
+        peak_hours TEXT,
+        plugin_count TEXT,
+        heavy_plugins TEXT,
+        php_version TEXT,
+        cache_enabled TEXT,
+        cdn_enabled TEXT,
+        wp_type TEXT,
+        predicted_load TEXT,
+        predicted_saturation_months TEXT,
+        capacity_margin TEXT,
+        status TEXT,
+        recommendation TEXT,
+        save_type TEXT
+    )");
+    
+    $pdo->exec("CREATE TABLE IF NOT EXISTS saved_results (
+        id TEXT PRIMARY KEY,
+        created_at TEXT,
+        data_json TEXT,
+        save_type TEXT
+    )");
+    
 } catch (Exception $e) {
     error_log("SQLite error: " . $e->getMessage());
 }
 
+// Fonctions de gestion des données
 function getPredictions($pdo) {
     if ($pdo === null) return [];
     if (!isset($_SESSION['user'])) return [];
@@ -62,16 +145,18 @@ function savePrediction($pdo, $data, &$errorMsg = null) {
     if (!isset($_SESSION['user'])) { $errorMsg = 'Non connecté.'; return false; }
     try {
         $stmt = $pdo->prepare("INSERT INTO predictions (
-            id, user, created_at, cpu_usage_avg, cpu_usage_peak, ram_usage_avg, ram_usage_max, disk_usage_avg, disk_usage_max, disk_read_iops, disk_write_iops, response_time,
-            visitors_per_day, pageviews_per_day, traffic_growth_rate, peak_hours_start, peak_hours_end, peak_hours,
-            plugin_count, heavy_plugins, php_version, cache_enabled, cdn_enabled,
-            wp_type, predicted_load, predicted_saturation_months, xgboost_score,
+            id, user, created_at, cpu_usage_avg, cpu_usage_peak, ram_usage_avg, ram_usage_max, 
+            disk_usage_avg, disk_usage_max, disk_read_iops, disk_write_iops, response_time,
+            visitors_per_day, pageviews_per_day, traffic_growth_rate, peak_hours_start, peak_hours_end, 
+            peak_hours, plugin_count, heavy_plugins, php_version, cache_enabled, cdn_enabled,
+            wp_type, predicted_load, predicted_saturation_months, capacity_margin,
             status, recommendation, save_type, is_deleted
         ) VALUES (
-            :id, :user, :created_at, :cpu_usage_avg, :cpu_usage_peak, :ram_usage_avg, :ram_usage_max, :disk_usage_avg, :disk_usage_max, :disk_read_iops, :disk_write_iops, :response_time,
-            :visitors_per_day, :pageviews_per_day, :traffic_growth_rate, :peak_hours_start, :peak_hours_end, :peak_hours,
-            :plugin_count, :heavy_plugins, :php_version, :cache_enabled, :cdn_enabled,
-            :wp_type, :predicted_load, :predicted_saturation_months, :xgboost_score,
+            :id, :user, :created_at, :cpu_usage_avg, :cpu_usage_peak, :ram_usage_avg, :ram_usage_max, 
+            :disk_usage_avg, :disk_usage_max, :disk_read_iops, :disk_write_iops, :response_time,
+            :visitors_per_day, :pageviews_per_day, :traffic_growth_rate, :peak_hours_start, :peak_hours_end, 
+            :peak_hours, :plugin_count, :heavy_plugins, :php_version, :cache_enabled, :cdn_enabled,
+            :wp_type, :predicted_load, :predicted_saturation_months, :capacity_margin,
             :status, :recommendation, :save_type, 0
         )");
         $stmt->execute([
@@ -101,7 +186,7 @@ function savePrediction($pdo, $data, &$errorMsg = null) {
             ':wp_type' => $data['wp_type'] ?? '',
             ':predicted_load' => $data['predicted_load'] ?? '',
             ':predicted_saturation_months' => $data['predicted_saturation_months'] ?? '',
-            ':xgboost_score' => $data['xgboost_score'] ?? '',
+            ':capacity_margin' => $data['capacity_margin'] ?? '',
             ':status' => $data['status'] ?? '',
             ':recommendation' => $data['recommendation'] ?? '',
             ':save_type' => $data['save_type'] ?? 'Manuel'
@@ -136,31 +221,62 @@ function archivePrediction($pdo, $id) {
         $stmt->execute([':id' => $id]);
         $pred = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($pred) {
-            $stmt2 = $pdo->prepare("INSERT INTO deleted_sauvegardes (id, created_at, cpu_usage_avg, cpu_usage_peak, ram_usage_avg, ram_usage_max, disk_usage_avg, disk_usage_max, disk_read_iops, disk_write_iops, response_time, visitors_per_day, pageviews_per_day, traffic_growth_rate, peak_hours_start, peak_hours_end, peak_hours, plugin_count, heavy_plugins, php_version, cache_enabled, cdn_enabled, wp_type, predicted_load, predicted_saturation_months, xgboost_score, status, recommendation, save_type, deleted_at, user) VALUES (:id, :created_at, :cpu_usage_avg, :cpu_usage_peak, :ram_usage_avg, :ram_usage_max, :disk_usage_avg, :disk_usage_max, :disk_read_iops, :disk_write_iops, :response_time, :visitors_per_day, :pageviews_per_day, :traffic_growth_rate, :peak_hours_start, :peak_hours_end, :peak_hours, :plugin_count, :heavy_plugins, :php_version, :cache_enabled, :cdn_enabled, :wp_type, :predicted_load, :predicted_saturation_months, :xgboost_score, :status, :recommendation, :save_type, :deleted_at, :user)");
+            $stmt2 = $pdo->prepare("INSERT INTO deleted_sauvegardes (
+                id, created_at, cpu_usage_avg, cpu_usage_peak, ram_usage_avg, ram_usage_max, 
+                disk_usage_avg, disk_usage_max, disk_read_iops, disk_write_iops, response_time, 
+                visitors_per_day, pageviews_per_day, traffic_growth_rate, peak_hours_start, peak_hours_end, 
+                peak_hours, plugin_count, heavy_plugins, php_version, cache_enabled, cdn_enabled, 
+                wp_type, predicted_load, predicted_saturation_months, capacity_margin, status, 
+                recommendation, save_type, deleted_at, user
+            ) VALUES (
+                :id, :created_at, :cpu_usage_avg, :cpu_usage_peak, :ram_usage_avg, :ram_usage_max, 
+                :disk_usage_avg, :disk_usage_max, :disk_read_iops, :disk_write_iops, :response_time, 
+                :visitors_per_day, :pageviews_per_day, :traffic_growth_rate, :peak_hours_start, :peak_hours_end, 
+                :peak_hours, :plugin_count, :heavy_plugins, :php_version, :cache_enabled, :cdn_enabled, 
+                :wp_type, :predicted_load, :predicted_saturation_months, :capacity_margin, :status, 
+                :recommendation, :save_type, :deleted_at, :user
+            )");
             $stmt2->execute([
-                ':id' => $pred['id'], ':created_at' => $pred['created_at'],
-                ':cpu_usage_avg' => $pred['cpu_usage_avg'], ':cpu_usage_peak' => $pred['cpu_usage_peak'],
-                ':ram_usage_avg' => $pred['ram_usage_avg'], ':ram_usage_max' => $pred['ram_usage_max'],
-                ':disk_usage_avg' => $pred['disk_usage_avg'], ':disk_usage_max' => $pred['disk_usage_max'],
-                ':disk_read_iops' => $pred['disk_read_iops'], ':disk_write_iops' => $pred['disk_write_iops'],
-                ':response_time' => $pred['response_time'], ':visitors_per_day' => $pred['visitors_per_day'],
-                ':pageviews_per_day' => $pred['pageviews_per_day'], ':traffic_growth_rate' => $pred['traffic_growth_rate'],
-                ':peak_hours_start' => $pred['peak_hours_start'], ':peak_hours_end' => $pred['peak_hours_end'],
-                ':peak_hours' => $pred['peak_hours'], ':plugin_count' => $pred['plugin_count'],
-                ':heavy_plugins' => $pred['heavy_plugins'], ':php_version' => $pred['php_version'],
-                ':cache_enabled' => $pred['cache_enabled'], ':cdn_enabled' => $pred['cdn_enabled'],
-                ':wp_type' => $pred['wp_type'], ':predicted_load' => $pred['predicted_load'],
+                ':id' => $pred['id'], 
+                ':created_at' => $pred['created_at'],
+                ':cpu_usage_avg' => $pred['cpu_usage_avg'], 
+                ':cpu_usage_peak' => $pred['cpu_usage_peak'],
+                ':ram_usage_avg' => $pred['ram_usage_avg'], 
+                ':ram_usage_max' => $pred['ram_usage_max'],
+                ':disk_usage_avg' => $pred['disk_usage_avg'], 
+                ':disk_usage_max' => $pred['disk_usage_max'],
+                ':disk_read_iops' => $pred['disk_read_iops'], 
+                ':disk_write_iops' => $pred['disk_write_iops'],
+                ':response_time' => $pred['response_time'], 
+                ':visitors_per_day' => $pred['visitors_per_day'],
+                ':pageviews_per_day' => $pred['pageviews_per_day'], 
+                ':traffic_growth_rate' => $pred['traffic_growth_rate'],
+                ':peak_hours_start' => $pred['peak_hours_start'], 
+                ':peak_hours_end' => $pred['peak_hours_end'],
+                ':peak_hours' => $pred['peak_hours'], 
+                ':plugin_count' => $pred['plugin_count'],
+                ':heavy_plugins' => $pred['heavy_plugins'], 
+                ':php_version' => $pred['php_version'],
+                ':cache_enabled' => $pred['cache_enabled'], 
+                ':cdn_enabled' => $pred['cdn_enabled'],
+                ':wp_type' => $pred['wp_type'], 
+                ':predicted_load' => $pred['predicted_load'],
                 ':predicted_saturation_months' => $pred['predicted_saturation_months'],
-                ':xgboost_score' => $pred['xgboost_score'], ':status' => $pred['status'],
-                ':recommendation' => $pred['recommendation'], ':save_type' => $pred['save_type'] ?? 'Manuel',
-                ':deleted_at' => date('Y-m-d H:i:s'), ':user' => $pred['user'] ?? ($_SESSION['user'] ?? null)
+                ':capacity_margin' => $pred['capacity_margin'], 
+                ':status' => $pred['status'],
+                ':recommendation' => $pred['recommendation'], 
+                ':save_type' => $pred['save_type'] ?? 'Manuel',
+                ':deleted_at' => date('Y-m-d H:i:s'), 
+                ':user' => $pred['user'] ?? ($_SESSION['user'] ?? null)
             ]);
             $stmt3 = $pdo->prepare("UPDATE predictions SET is_deleted = 1 WHERE id = :id");
             $stmt3->execute([':id' => $id]);
             return true;
         }
         return false;
-    } catch (Exception $e) { return false; }
+    } catch (Exception $e) { 
+        return false; 
+    }
 }
 
 function deletePermanently($pdo, $id) {
@@ -169,7 +285,9 @@ function deletePermanently($pdo, $id) {
         $stmt = $pdo->prepare("DELETE FROM deleted_sauvegardes WHERE id = :id");
         $stmt->execute([':id' => $id]);
         return true;
-    } catch (Exception $e) { return false; }
+    } catch (Exception $e) { 
+        return false; 
+    }
 }
 
 function restorePrediction($pdo, $id) {
@@ -180,30 +298,61 @@ function restorePrediction($pdo, $id) {
         $pred = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($pred) {
             $new_id = uniqid();
-            $stmt2 = $pdo->prepare("INSERT INTO predictions (id, user, created_at, cpu_usage_avg, cpu_usage_peak, ram_usage_avg, ram_usage_max, disk_usage_avg, disk_usage_max, disk_read_iops, disk_write_iops, response_time, visitors_per_day, pageviews_per_day, traffic_growth_rate, peak_hours_start, peak_hours_end, peak_hours, plugin_count, heavy_plugins, php_version, cache_enabled, cdn_enabled, wp_type, predicted_load, predicted_saturation_months, xgboost_score, status, recommendation, save_type, is_deleted) VALUES (:id, :user, :created_at, :cpu_usage_avg, :cpu_usage_peak, :ram_usage_avg, :ram_usage_max, :disk_usage_avg, :disk_usage_max, :disk_read_iops, :disk_write_iops, :response_time, :visitors_per_day, :pageviews_per_day, :traffic_growth_rate, :peak_hours_start, :peak_hours_end, :peak_hours, :plugin_count, :heavy_plugins, :php_version, :cache_enabled, :cdn_enabled, :wp_type, :predicted_load, :predicted_saturation_months, :xgboost_score, :status, :recommendation, :save_type, 0)");
+            $stmt2 = $pdo->prepare("INSERT INTO predictions (
+                id, user, created_at, cpu_usage_avg, cpu_usage_peak, ram_usage_avg, ram_usage_max, 
+                disk_usage_avg, disk_usage_max, disk_read_iops, disk_write_iops, response_time, 
+                visitors_per_day, pageviews_per_day, traffic_growth_rate, peak_hours_start, peak_hours_end, 
+                peak_hours, plugin_count, heavy_plugins, php_version, cache_enabled, cdn_enabled, 
+                wp_type, predicted_load, predicted_saturation_months, capacity_margin, status, 
+                recommendation, save_type, is_deleted
+            ) VALUES (
+                :id, :user, :created_at, :cpu_usage_avg, :cpu_usage_peak, :ram_usage_avg, :ram_usage_max, 
+                :disk_usage_avg, :disk_usage_max, :disk_read_iops, :disk_write_iops, :response_time, 
+                :visitors_per_day, :pageviews_per_day, :traffic_growth_rate, :peak_hours_start, :peak_hours_end, 
+                :peak_hours, :plugin_count, :heavy_plugins, :php_version, :cache_enabled, :cdn_enabled, 
+                :wp_type, :predicted_load, :predicted_saturation_months, :capacity_margin, :status, 
+                :recommendation, :save_type, 0
+            )");
             $stmt2->execute([
-                ':id' => $new_id, ':user' => $_SESSION['user'], ':created_at' => $pred['created_at'],
-                ':cpu_usage_avg' => $pred['cpu_usage_avg'], ':cpu_usage_peak' => $pred['cpu_usage_peak'],
-                ':ram_usage_avg' => $pred['ram_usage_avg'], ':ram_usage_max' => $pred['ram_usage_max'],
-                ':disk_usage_avg' => $pred['disk_usage_avg'], ':disk_usage_max' => $pred['disk_usage_max'],
-                ':disk_read_iops' => $pred['disk_read_iops'], ':disk_write_iops' => $pred['disk_write_iops'],
-                ':response_time' => $pred['response_time'], ':visitors_per_day' => $pred['visitors_per_day'],
-                ':pageviews_per_day' => $pred['pageviews_per_day'], ':traffic_growth_rate' => $pred['traffic_growth_rate'],
-                ':peak_hours_start' => $pred['peak_hours_start'], ':peak_hours_end' => $pred['peak_hours_end'],
-                ':peak_hours' => $pred['peak_hours'], ':plugin_count' => $pred['plugin_count'],
-                ':heavy_plugins' => $pred['heavy_plugins'], ':php_version' => $pred['php_version'],
-                ':cache_enabled' => $pred['cache_enabled'], ':cdn_enabled' => $pred['cdn_enabled'],
-                ':wp_type' => $pred['wp_type'], ':predicted_load' => $pred['predicted_load'],
+                ':id' => $new_id, 
+                ':user' => $_SESSION['user'], 
+                ':created_at' => $pred['created_at'],
+                ':cpu_usage_avg' => $pred['cpu_usage_avg'], 
+                ':cpu_usage_peak' => $pred['cpu_usage_peak'],
+                ':ram_usage_avg' => $pred['ram_usage_avg'], 
+                ':ram_usage_max' => $pred['ram_usage_max'],
+                ':disk_usage_avg' => $pred['disk_usage_avg'], 
+                ':disk_usage_max' => $pred['disk_usage_max'],
+                ':disk_read_iops' => $pred['disk_read_iops'], 
+                ':disk_write_iops' => $pred['disk_write_iops'],
+                ':response_time' => $pred['response_time'], 
+                ':visitors_per_day' => $pred['visitors_per_day'],
+                ':pageviews_per_day' => $pred['pageviews_per_day'], 
+                ':traffic_growth_rate' => $pred['traffic_growth_rate'],
+                ':peak_hours_start' => $pred['peak_hours_start'], 
+                ':peak_hours_end' => $pred['peak_hours_end'],
+                ':peak_hours' => $pred['peak_hours'], 
+                ':plugin_count' => $pred['plugin_count'],
+                ':heavy_plugins' => $pred['heavy_plugins'], 
+                ':php_version' => $pred['php_version'],
+                ':cache_enabled' => $pred['cache_enabled'], 
+                ':cdn_enabled' => $pred['cdn_enabled'],
+                ':wp_type' => $pred['wp_type'], 
+                ':predicted_load' => $pred['predicted_load'],
                 ':predicted_saturation_months' => $pred['predicted_saturation_months'],
-                ':xgboost_score' => $pred['xgboost_score'], ':status' => $pred['status'],
-                ':recommendation' => $pred['recommendation'], ':save_type' => $pred['save_type'] ?? 'Manuel'
+                ':capacity_margin' => $pred['capacity_margin'], 
+                ':status' => $pred['status'],
+                ':recommendation' => $pred['recommendation'], 
+                ':save_type' => $pred['save_type'] ?? 'Manuel'
             ]);
             $stmt3 = $pdo->prepare("DELETE FROM deleted_sauvegardes WHERE id = :id");
             $stmt3->execute([':id' => $id]);
             return true;
         }
         return false;
-    } catch (Exception $e) { return false; }
+    } catch (Exception $e) { 
+        return false; 
+    }
 }
 
 function emptyTrash($pdo) {
@@ -212,9 +361,12 @@ function emptyTrash($pdo) {
         $stmt = $pdo->prepare("DELETE FROM deleted_sauvegardes");
         $stmt->execute();
         return true;
-    } catch (Exception $e) { return false; }
+    } catch (Exception $e) { 
+        return false; 
+    }
 }
 
+// Export CSV
 if (isset($_GET['export_full_csv']) && isset($_SESSION['user'])) {
     $predictions = getPredictions($pdo);
     if (ob_get_level()) ob_end_clean();
@@ -222,25 +374,52 @@ if (isset($_GET['export_full_csv']) && isset($_SESSION['user'])) {
     header('Content-Disposition: attachment; filename="vala_bleu_export_' . date('Y-m-d_His') . '.csv"');
     echo "\xEF\xBB\xBF";
     $output = fopen('php://output', 'w');
-    fputcsv($output, ['Date','Heure','Pack','Visiteurs/j','Pages vues/j','Croissance (%)','CPU moyen (%)','CPU max (%)','RAM moyenne (%)','RAM max (%)','Disque moyen (%)','Disque max (%)','IOPS Read','IOPS Write','Temps réponse (ms)','Pic début','Pic fin','Nb plugins','Plugins lourds','PHP','Cache','CDN','Score XGBoost (%)','Charge prédite (%)','Saturation (mois)','Statut','Recommandation','Type','ID'], ';');
+    fputcsv($output, [
+        'Date', 'Heure', 'Pack', 'Visiteurs/j', 'Pages vues/j', 'Croissance (%)', 
+        'CPU moyen (%)', 'CPU max (%)', 'RAM moyenne (%)', 'RAM max (%)', 
+        'Disque moyen (%)', 'Disque max (%)', 'IOPS Read', 'IOPS Write', 
+        'Temps réponse (ms)', 'Pic début', 'Pic fin', 'Nb plugins', 'Plugins lourds', 
+        'PHP', 'Cache', 'CDN', 'Marge (%)', 'Charge prédite (%)', 'Saturation (mois)', 
+        'Statut', 'Recommandation', 'Type', 'ID'
+    ], ';');
     foreach ($predictions as $p) {
         fputcsv($output, [
-            date('d/m/Y', strtotime($p['created_at'] ?? '')), date('H:i:s', strtotime($p['created_at'] ?? '')),
-            strtoupper($p['wp_type'] ?? ''), $p['visitors_per_day'] ?? '', $p['pageviews_per_day'] ?? '',
-            $p['traffic_growth_rate'] ?? '', $p['cpu_usage_avg'] ?? '', $p['cpu_usage_peak'] ?? '',
-            $p['ram_usage_avg'] ?? '', $p['ram_usage_max'] ?? '', $p['disk_usage_avg'] ?? '', $p['disk_usage_max'] ?? '',
-            $p['disk_read_iops'] ?? '', $p['disk_write_iops'] ?? '', $p['response_time'] ?? '',
-            $p['peak_hours_start'] ?? '', $p['peak_hours_end'] ?? '', $p['plugin_count'] ?? '',
-            $p['heavy_plugins'] ?? '', $p['php_version'] ?? '', $p['cache_enabled'] ?? '', $p['cdn_enabled'] ?? '',
-            $p['xgboost_score'] ?? '', $p['predicted_load'] ?? '', $p['predicted_saturation_months'] ?? '',
-            $p['status'] ?? '', '"' . str_replace('"', '""', $p['recommendation'] ?? '') . '"',
-            $p['save_type'] ?? 'Manuel', $p['id'] ?? ''
+            date('d/m/Y', strtotime($p['created_at'] ?? '')), 
+            date('H:i:s', strtotime($p['created_at'] ?? '')),
+            strtoupper($p['wp_type'] ?? ''), 
+            $p['visitors_per_day'] ?? '', 
+            $p['pageviews_per_day'] ?? '',
+            $p['traffic_growth_rate'] ?? '', 
+            $p['cpu_usage_avg'] ?? '', 
+            $p['cpu_usage_peak'] ?? '',
+            $p['ram_usage_avg'] ?? '', 
+            $p['ram_usage_max'] ?? '', 
+            $p['disk_usage_avg'] ?? '', 
+            $p['disk_usage_max'] ?? '',
+            $p['disk_read_iops'] ?? '', 
+            $p['disk_write_iops'] ?? '', 
+            $p['response_time'] ?? '',
+            $p['peak_hours_start'] ?? '', 
+            $p['peak_hours_end'] ?? '', 
+            $p['plugin_count'] ?? '',
+            $p['heavy_plugins'] ?? '', 
+            $p['php_version'] ?? '', 
+            $p['cache_enabled'] ?? '', 
+            $p['cdn_enabled'] ?? '',
+            $p['capacity_margin'] ?? '', 
+            $p['predicted_load'] ?? '', 
+            $p['predicted_saturation_months'] ?? '',
+            $p['status'] ?? '', 
+            '"' . str_replace('"', '""', $p['recommendation'] ?? '') . '"',
+            $p['save_type'] ?? 'Manuel', 
+            $p['id'] ?? ''
         ], ';');
     }
     fclose($output);
     exit();
 }
 
+// Téléchargement JSON
 if (isset($_GET['download_json']) && isset($_SESSION['user'])) {
     $stmt = $pdo->prepare("SELECT * FROM saved_results WHERE id = :id");
     $stmt->execute([':id' => $_GET['download_json']]);
@@ -254,6 +433,7 @@ if (isset($_GET['download_json']) && isset($_SESSION['user'])) {
     }
 }
 
+// Traitement des requêtes AJAX
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] === 'XMLHttpRequest') {
     if (ob_get_level()) ob_end_clean();
     header('Content-Type: application/json; charset=utf-8');
@@ -289,21 +469,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
         }
         if (isset($data['predicted_load'])) {
             $prediction = [
-                'id' => uniqid(), 'created_at' => date('Y-m-d H:i:s'),
-                'cpu_usage_avg' => $data['cpu_usage_avg'] ?? '', 'cpu_usage_peak' => $data['cpu_usage_peak'] ?? '',
-                'ram_usage_avg' => $data['ram_usage_avg'] ?? '', 'ram_usage_max' => $data['ram_usage_max'] ?? '',
-                'disk_usage_avg' => $data['disk_usage_avg'] ?? '', 'disk_usage_max' => $data['disk_usage_max'] ?? '',
-                'disk_read_iops' => $data['disk_read_iops'] ?? '', 'disk_write_iops' => $data['disk_write_iops'] ?? '',
-                'response_time' => $data['response_time'] ?? '', 'visitors_per_day' => $data['visitors_per_day'] ?? '',
-                'pageviews_per_day' => $data['pageviews_per_day'] ?? '', 'traffic_growth_rate' => $data['traffic_growth_rate'] ?? '',
-                'peak_hours_start' => $data['peak_hours_start'] ?? '', 'peak_hours_end' => $data['peak_hours_end'] ?? '',
-                'peak_hours' => $data['peak_hours'] ?? '', 'plugin_count' => $data['plugin_count'] ?? '',
-                'heavy_plugins' => $data['heavy_plugins'] ?? '', 'php_version' => $data['php_version'] ?? '',
-                'cache_enabled' => $data['cache_enabled'] ?? '', 'cdn_enabled' => $data['cdn_enabled'] ?? '',
-                'wp_type' => $data['wp_type'] ?? '', 'predicted_load' => $data['predicted_load'] ?? '',
+                'id' => uniqid(), 
+                'created_at' => date('Y-m-d H:i:s'),
+                'cpu_usage_avg' => $data['cpu_usage_avg'] ?? '', 
+                'cpu_usage_peak' => $data['cpu_usage_peak'] ?? '',
+                'ram_usage_avg' => $data['ram_usage_avg'] ?? '', 
+                'ram_usage_max' => $data['ram_usage_max'] ?? '',
+                'disk_usage_avg' => $data['disk_usage_avg'] ?? '', 
+                'disk_usage_max' => $data['disk_usage_max'] ?? '',
+                'disk_read_iops' => $data['disk_read_iops'] ?? '', 
+                'disk_write_iops' => $data['disk_write_iops'] ?? '',
+                'response_time' => $data['response_time'] ?? '', 
+                'visitors_per_day' => $data['visitors_per_day'] ?? '',
+                'pageviews_per_day' => $data['pageviews_per_day'] ?? '', 
+                'traffic_growth_rate' => $data['traffic_growth_rate'] ?? '',
+                'peak_hours_start' => $data['peak_hours_start'] ?? '', 
+                'peak_hours_end' => $data['peak_hours_end'] ?? '',
+                'peak_hours' => $data['peak_hours'] ?? '', 
+                'plugin_count' => $data['plugin_count'] ?? '',
+                'heavy_plugins' => $data['heavy_plugins'] ?? '', 
+                'php_version' => $data['php_version'] ?? '',
+                'cache_enabled' => $data['cache_enabled'] ?? '', 
+                'cdn_enabled' => $data['cdn_enabled'] ?? '',
+                'wp_type' => $data['wp_type'] ?? '', 
+                'predicted_load' => $data['predicted_load'] ?? '',
                 'predicted_saturation_months' => $data['predicted_saturation_months'] ?? '',
-                'xgboost_score' => $data['xgboost_score'] ?? '', 'status' => $data['status'] ?? '',
-                'recommendation' => $data['recommendation'] ?? '', 'save_type' => 'Manuel'
+                'capacity_margin' => $data['capacity_margin'] ?? '',
+                'status' => $data['status'] ?? '',
+                'recommendation' => $data['recommendation'] ?? '', 
+                'save_type' => 'Manuel'
             ];
             $errorMsg = null;
             $success = savePrediction($pdo, $prediction, $errorMsg);
@@ -319,20 +513,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
     }
 }
 
-if (isset($_GET['logout'])) {
-    $_SESSION = []; session_destroy();
-    if (isset($_COOKIE['remember_user'])) setcookie("remember_user", "", time() - 3600, "/");
-    header("Location: index.php?logout=1");
-    exit();
-}
-
+// Récupération des données pour l'affichage
 $history_predictions = getPredictions($pdo);
 $deleted_sauvegardes = getDeletedSauvegardes($pdo);
 $saved_results = getSavedResults($pdo);
 
 // Récupérer l'onglet actif depuis l'URL
 $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'dashboard';
-// Validation de l'onglet
 $valid_tabs = ['dashboard', 'resultats', 'sauvegardes', 'historique', 'corbeille'];
 if (!in_array($active_tab, $valid_tabs)) {
     $active_tab = 'dashboard';
@@ -353,15 +540,30 @@ if (!in_array($active_tab, $valid_tabs)) {
 <div id="toast" class="toast-notification"></div>
 
 <div class="sidebar">
-    <div class="sidebar-header"><h2>VALA BLEU</h2><p>Dashboard</p></div>
+    <div class="sidebar-header">
+        <h2>VALA BLEU</h2>
+        <p>Dashboard</p>
+    </div>
     <nav class="sidebar-nav">
-        <div class="menu-item <?php echo $active_tab === 'dashboard' ? 'active-menu' : ''; ?>" onclick="showTab('dashboard')"><span class="menu-icon">⚙️</span><span>Paramètres</span></div>
-        <div class="menu-item <?php echo $active_tab === 'resultats' ? 'active-menu' : ''; ?>" onclick="showTab('resultats')"><span class="menu-icon">📊</span><span>Résultats</span></div>
-        <div class="menu-item <?php echo $active_tab === 'sauvegardes' ? 'active-menu' : ''; ?>" onclick="showTab('sauvegardes')"><span class="menu-icon">💾</span><span>Sauvegardes</span></div>
-        <div class="menu-item <?php echo $active_tab === 'historique' ? 'active-menu' : ''; ?>" onclick="showTab('historique')"><span class="menu-icon">📋</span><span>Historique</span></div>
-        <div class="menu-item <?php echo $active_tab === 'corbeille' ? 'active-menu' : ''; ?>" onclick="showTab('corbeille')"><span class="menu-icon">🗑️</span><span>Corbeille</span></div>
+        <div class="menu-item <?php echo $active_tab === 'dashboard' ? 'active-menu' : ''; ?>" onclick="showTab('dashboard')">
+            <span class="menu-icon">⚙️</span><span>Paramètres</span>
+        </div>
+        <div class="menu-item <?php echo $active_tab === 'resultats' ? 'active-menu' : ''; ?>" onclick="showTab('resultats')">
+            <span class="menu-icon">📊</span><span>Résultats</span>
+        </div>
+        <div class="menu-item <?php echo $active_tab === 'sauvegardes' ? 'active-menu' : ''; ?>" onclick="showTab('sauvegardes')">
+            <span class="menu-icon">💾</span><span>Sauvegardes</span>
+        </div>
+        <div class="menu-item <?php echo $active_tab === 'historique' ? 'active-menu' : ''; ?>" onclick="showTab('historique')">
+            <span class="menu-icon">📋</span><span>Historique</span>
+        </div>
+        <div class="menu-item <?php echo $active_tab === 'corbeille' ? 'active-menu' : ''; ?>" onclick="showTab('corbeille')">
+            <span class="menu-icon">🗑️</span><span>Corbeille</span>
+        </div>
     </nav>
-    <a href="?logout=1" class="logout-link"><span class="menu-icon">🚪</span><span>Déconnexion</span></a>
+    <a href="?logout=1" class="logout-link">
+        <span class="menu-icon">🚪</span><span>Déconnexion</span>
+    </a>
 </div>
 
 <div style="position:absolute;top:10px;right:20px;background:linear-gradient(135deg,#1e293b,#334155);color:#fff;padding:8px 20px;border-radius:8px;font-size:0.98rem;box-shadow:0 2px 16px rgba(0,0,0,0.22);z-index:2000;display:flex;align-items:center;gap:8px;pointer-events:auto;">
@@ -370,6 +572,7 @@ if (!in_array($active_tab, $valid_tabs)) {
 
 <div class="main-content">
 
+    <!-- Onglet Paramètres / Dashboard -->
     <div id="dashboard" class="tab-content <?php echo $active_tab === 'dashboard' ? 'active-tab' : ''; ?>" style="<?php echo $active_tab !== 'dashboard' ? 'display:none;' : ''; ?>">
         <div class="page-title">
             <h1>Saisie des paramètres</h1>
@@ -378,49 +581,159 @@ if (!in_array($active_tab, $valid_tabs)) {
                 <span>🔄</span> Réinitialiser
             </button>
         </div>
-        <div class="param-section"><h4>📈 Trafic</h4><div class="grid-4">
-            <div class="form-group"><label>Visiteurs / jour <span class="required">*</span></label><input type="number" id="visitors_per_day" placeholder="Ex: 5000"></div>
-            <div class="form-group"><label>Pages vues / jour</label><input type="number" id="pageviews_per_day" placeholder="Ex: 150"></div>
-            <div class="form-group"><label>Taux de croissance (%) <span class="required">*</span></label><input type="number" id="traffic_growth_rate" placeholder="Ex: 15"></div>
-            <div class="form-group"><label>PICS HORAIRES</label><div class="time-range"><input type="time" id="peak_hours_start"><span class="time-separator">à</span><input type="time" id="peak_hours_end"></div></div>
-        </div></div>
-        <div class="param-section"><h4>🖥️ Ressources Serveur</h4><div class="grid-4">
-            <div class="form-group"><label>CPU moyen (%) <span class="required">*</span></label><input type="number" id="cpu_usage_avg" placeholder="Ex: 45"></div>
-            <div class="form-group"><label>CPU max (%) <span class="required">*</span></label><input type="number" id="cpu_usage_peak" placeholder="Ex: 75"></div>
-            <div class="form-group"><label>RAM moyenne (%) <span class="required">*</span></label><input type="number" id="ram_usage_avg" placeholder="Ex: 60"></div>
-            <div class="form-group"><label>RAM max (%) <span class="required">*</span></label><input type="number" id="ram_usage_max" placeholder="Ex: 85"></div>
-            <div class="form-group"><label>Disque utilisé (%)</label><input type="number" id="disk_usage_avg" placeholder="Ex: 45"></div>
-            <div class="form-group"><label>Disque max (%)</label><input type="number" id="disk_usage_max" placeholder="Ex: 70"></div>
-            <div class="form-group"><label>Temps réponse (ms)</label><input type="number" id="response_time" placeholder="Ex: 350"></div>
-            <div class="form-group"><label>I/O Disque (IOPS)</label><div class="double-input"><div class="input-half"><label>Read</label><input type="number" id="disk_read_iops" placeholder="120"></div><div class="input-half"><label>Write</label><input type="number" id="disk_write_iops" placeholder="80"></div></div></div>
-        </div></div>
-        <div class="param-section"><h4>🔌 WordPress</h4><div class="grid-4">
-            <div class="form-group"><label>Nombre de plugins <span class="required">*</span></label><input type="number" id="plugin_count" placeholder="Ex: 25"></div>
-            <div class="form-group"><label>Plugins lourds</label><div class="checkbox-group" id="heavy_plugins_group">
-                <label class="checkbox-item"><input type="checkbox" value="woocommerce">WooCommerce</label>
-                <label class="checkbox-item"><input type="checkbox" value="elementor">Elementor</label>
-                <label class="checkbox-item"><input type="checkbox" value="wpml">WPML</label>
-                <label class="checkbox-item"><input type="checkbox" value="yoast">Yoast SEO</label>
-                <label class="checkbox-item"><input type="checkbox" value="revslider">RevSlider</label>
-                <label class="checkbox-item"><input type="checkbox" value="gravityforms">Gravity Forms</label>
-            </div></div>
-            <div class="form-group"><label>Version PHP</label><select id="php_version"><option value="none" selected>Choisir quelle version</option><option value="7.4">PHP 7.4</option><option value="8.0">PHP 8.0</option><option value="8.1">PHP 8.1</option><option value="8.2">PHP 8.2</option><option value="8.3">PHP 8.3</option></select></div>
-            <div class="form-group"><label>Cache activé</label><select id="cache_enabled"><option value="none" selected>Choisir quelle option</option><option value="oui">Oui</option><option value="non">Non</option></select></div>
-            <div class="form-group"><label>CDN activé</label><select id="cdn_enabled"><option value="none" selected>Choisir quelle option</option><option value="oui">Oui</option><option value="non">Non</option></select></div>
-            <div class="form-group"><label>Pack WordPress <span class="required">*</span></label><select id="wp_type"><option value="none" selected>Choisir quel pack</option><option value="small">SMALL</option><option value="medium">MEDIUM</option><option value="performance">PERFORMANCE</option></select></div>
-        </div></div>
-        <div class="action-center"><button class="btn-primary btn-launch" onclick="runAnalysis()"><span>🚀</span> LANCER L'ANALYSE Prédictif</button></div>
+        
+        <div class="param-section">
+            <h4>📈 Trafic</h4>
+            <div class="grid-4">
+                <div class="form-group">
+                    <label>Visiteurs / jour <span class="required">*</span></label>
+                    <input type="number" id="visitors_per_day" placeholder="Ex: 5000">
+                </div>
+                <div class="form-group">
+                    <label>Pages vues / jour</label>
+                    <input type="number" id="pageviews_per_day" placeholder="Ex: 150">
+                </div>
+                <div class="form-group">
+                    <label>Taux de croissance (%) <span class="required">*</span></label>
+                    <input type="number" id="traffic_growth_rate" placeholder="Ex: 15">
+                </div>
+                <div class="form-group">
+                    <label>PICS HORAIRES</label>
+                    <div class="time-range">
+                        <input type="time" id="peak_hours_start">
+                        <span class="time-separator">à</span>
+                        <input type="time" id="peak_hours_end">
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="param-section">
+            <h4>🖥️ Ressources Serveur</h4>
+            <div class="grid-4">
+                <div class="form-group">
+                    <label>CPU moyen (%) <span class="required">*</span></label>
+                    <input type="number" id="cpu_usage_avg" placeholder="Ex: 45">
+                </div>
+                <div class="form-group">
+                    <label>CPU max (%) <span class="required">*</span></label>
+                    <input type="number" id="cpu_usage_peak" placeholder="Ex: 75">
+                </div>
+                <div class="form-group">
+                    <label>RAM moyenne (%) <span class="required">*</span></label>
+                    <input type="number" id="ram_usage_avg" placeholder="Ex: 60">
+                </div>
+                <div class="form-group">
+                    <label>RAM max (%) <span class="required">*</span></label>
+                    <input type="number" id="ram_usage_max" placeholder="Ex: 85">
+                </div>
+                <div class="form-group">
+                    <label>Disque utilisé (%)</label>
+                    <input type="number" id="disk_usage_avg" placeholder="Ex: 45">
+                </div>
+                <div class="form-group">
+                    <label>Disque max (%)</label>
+                    <input type="number" id="disk_usage_max" placeholder="Ex: 70">
+                </div>
+                <div class="form-group">
+                    <label>Temps réponse (ms)</label>
+                    <input type="number" id="response_time" placeholder="Ex: 350">
+                </div>
+                <div class="form-group">
+                    <label>I/O Disque (IOPS)</label>
+                    <div class="double-input">
+                        <div class="input-half">
+                            <label>Read</label>
+                            <input type="number" id="disk_read_iops" placeholder="120">
+                        </div>
+                        <div class="input-half">
+                            <label>Write</label>
+                            <input type="number" id="disk_write_iops" placeholder="80">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="param-section">
+            <h4>🔌 WordPress</h4>
+            <div class="grid-4">
+                <div class="form-group">
+                    <label>Nombre de plugins <span class="required">*</span></label>
+                    <input type="number" id="plugin_count" placeholder="Ex: 25">
+                </div>
+                <div class="form-group">
+                    <label>Plugins lourds</label>
+                    <div class="checkbox-group" id="heavy_plugins_group">
+                        <label class="checkbox-item"><input type="checkbox" value="woocommerce">WooCommerce</label>
+                        <label class="checkbox-item"><input type="checkbox" value="elementor">Elementor</label>
+                        <label class="checkbox-item"><input type="checkbox" value="wpml">WPML</label>
+                        <label class="checkbox-item"><input type="checkbox" value="yoast">Yoast SEO</label>
+                        <label class="checkbox-item"><input type="checkbox" value="revslider">RevSlider</label>
+                        <label class="checkbox-item"><input type="checkbox" value="gravityforms">Gravity Forms</label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Version PHP</label>
+                    <select id="php_version">
+                        <option value="none" selected>Choisir quelle version</option>
+                        <option value="7.4">PHP 7.4</option>
+                        <option value="8.0">PHP 8.0</option>
+                        <option value="8.1">PHP 8.1</option>
+                        <option value="8.2">PHP 8.2</option>
+                        <option value="8.3">PHP 8.3</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Cache activé</label>
+                    <select id="cache_enabled">
+                        <option value="none" selected>Choisir quelle option</option>
+                        <option value="oui">Oui</option>
+                        <option value="non">Non</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>CDN activé</label>
+                    <select id="cdn_enabled">
+                        <option value="none" selected>Choisir quelle option</option>
+                        <option value="oui">Oui</option>
+                        <option value="non">Non</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Pack WordPress <span class="required">*</span></label>
+                    <select id="wp_type">
+                        <option value="none" selected>Choisir quel pack</option>
+                        <option value="small">SMALL</option>
+                        <option value="medium">MEDIUM</option>
+                        <option value="performance">PERFORMANCE</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <div class="action-center">
+            <button class="btn-primary btn-launch" onclick="runAnalysis()">
+                <span>🚀</span> LANCER L'ANALYSE Prédictif
+            </button>
+        </div>
     </div>
 
+    <!-- Onglet Résultats -->
     <div id="resultats" class="tab-content <?php echo $active_tab === 'resultats' ? 'active-tab' : ''; ?>" style="<?php echo $active_tab !== 'resultats' ? 'display:none;' : ''; ?>">
-        <div class="page-title"><h1>Résultats de l'analyse</h1><p>Prédiction basée sur les paramètres fournis</p></div>
+        <div class="page-title">
+            <h1>Résultats de l'analyse</h1>
+            <p>Prédiction basée sur les paramètres fournis</p>
+        </div>
         <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
             <a href="graphes.php" class="btn-secondary" style="background:linear-gradient(135deg,#64748b,#334155);color:#fff;padding:10px 24px;font-size:1em;border:none;border-radius:7px;cursor:pointer;box-shadow:0 2px 8px rgba(100,116,139,0.12);font-weight:500;text-decoration:none;">
                 <span>🖼️</span> Voir les graphiques avancés
             </a>
         </div>
         <div id="noResults" class="card empty-state" style="display:block;">
-            <div class="empty-icon"><img src="icons/resultas.png" alt="Aucun résultat" style="width:64px;height:64px;"></div>
+            <div class="empty-icon">
+                <img src="icons/resultas.png" alt="Aucun résultat" style="width:64px;height:64px;">
+            </div>
             <h3>Aucune analyse générée</h3>
             <p>Remplissez les paramètres et cliquez sur "LANCER L'ANALYSE"</p>
         </div>
@@ -429,13 +742,25 @@ if (!in_array($active_tab, $valid_tabs)) {
             <p>Prédiction en cours...</p>
         </div>
         <div id="resultsContainer" style="display:none;">
-            <div class="card"><h3>📊 Scores de Performance</h3><div id="scoresDisplay"></div></div>
-            <div class="card"><h3>💡 Recommandation</h3><div id="recommendationDisplay"></div></div>
+            <div class="card">
+                <h3>📊 Scores de Performance</h3>
+                <div id="scoresDisplay"></div>
+            </div>
+            <div class="card">
+                <h3>💡 Recommandation</h3>
+                <div id="recommendationDisplay"></div>
+            </div>
         </div>
     </div>
 
+    <!-- Onglet Sauvegardes -->
     <div id="sauvegardes" class="tab-content <?php echo $active_tab === 'sauvegardes' ? 'active-tab' : ''; ?>" style="<?php echo $active_tab !== 'sauvegardes' ? 'display:none;' : ''; ?>">
-        <div class="page-header-with-action"><div class="page-title"><h1>💾 Sauvegardes des résultats</h1><p>Résultats sauvegardés sans images</p></div></div>
+        <div class="page-header-with-action">
+            <div class="page-title">
+                <h1>💾 Sauvegardes des résultats</h1>
+                <p>Résultats sauvegardés sans images</p>
+            </div>
+        </div>
         <div class="card" style="display: flex; justify-content: center; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px;">
             <button class="btn-primary btn-save" id="saveResultBtn" onclick="saveCurrentResult()">
                 <span>💾</span> Sauvegarder dans l'historique
@@ -443,67 +768,153 @@ if (!in_array($active_tab, $valid_tabs)) {
         </div>
     </div>
 
+    <!-- Onglet Historique -->
     <div id="historique" class="tab-content <?php echo $active_tab === 'historique' ? 'active-tab' : ''; ?>" style="<?php echo $active_tab !== 'historique' ? 'display:none;' : ''; ?>">
         <div class="page-header-with-action">
-            <div class="page-title"><h1>Historique des analyses</h1><p>Toutes les analyses sauvegardées</p></div>
-            <div style="display:flex;gap:10px;align-items:center;">
-                <a href="?export_full_csv=1" class="btn-export-csv"><span>📥</span> Exporter tout en CSV</a>
+            <div class="page-title">
+                <h1>Historique des analyses</h1>
+                <p>Toutes les analyses sauvegardées</p>
             </div>
         </div>
-        <div class="config-card"><div class="table-wrapper"><table class="history-table"><thead><tr><th>Date</th><th>Pack</th><th>Visiteurs/j</th><th>Croissance</th><th>CPU/RAM</th><th>Plugins</th><th>Score</th><th>Charge</th><th>Statut</th><th>Action</th></tr></thead><tbody>
-            <?php if (count($history_predictions) > 0): ?>
-                <?php foreach ($history_predictions as $pred): ?>
-                    <tr>
-                        <td class="td-date"><?php echo date('d/m/Y', strtotime($pred['created_at'])); ?><br><span style="font-size:11px;color:#888;"><?php echo date('H:i', strtotime($pred['created_at'])); ?></span></td>
-                        <td><span class="badge-pack"><?php echo strtoupper($pred['wp_type'] ?? 'N/A'); ?></span></td>
-                        <td class="td-number"><?php echo is_numeric($pred['visitors_per_day']) ? number_format((float)$pred['visitors_per_day']) : ''; ?></td>
-                        <td class="td-growth"><?php echo $pred['traffic_growth_rate']; ?>%</td>
-                        <td class="td-usage"><?php echo $pred['cpu_usage_avg']; ?>% / <?php echo $pred['ram_usage_avg']; ?>%</td>
-                        <td class="td-number"><?php echo $pred['plugin_count']; ?></td>
-                                                <td class="td-score">
-                                                    <?php
-                                                        $r2 = $pred['xgboost_score'];
-                                                        echo (is_numeric($r2) && $r2 !== null) ? number_format((float)$r2, 4) : 'N/A';
-                                                    ?>
-                                                </td>
-                        <td class="td-number"><?php echo $pred['predicted_load']; ?>%</td>
-                        <td><span class="badge-status <?php echo $pred['status'] == 'CRITIQUE' ? 'badge-critical' : ($pred['status'] == 'SURVEILLANCE' ? 'badge-warning' : 'badge-optimal'); ?>"><?php echo $pred['status']; ?></span></td>
-                        <td><button class="btn-icon btn-archive" onclick="archiverAnalyse('<?php echo $pred['id']; ?>')" title="Archiver">📦</button></td>
-                    </tr>
-                <?php endforeach; ?>
-            <?php else: ?>
-                <tr><td colspan="10" class="empty-table-cell"><div class="empty-icon"><img src="icons/historique.png" alt="Aucun historique" style="width:64px;height:64px;"></div><p>Aucune analyse sauvegardée</p></td></tr>
-            <?php endif; ?>
-        </tbody></table></div></div>
+        <div class="table-header-action multiple-buttons">
+            <a href="?export_full_csv=1" class="btn-export-csv">
+                <span>📥</span> Exporter tout en CSV
+            </a>
+        </div>
+        <div class="config-card">
+            <div class="table-wrapper">
+                <table class="history-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Pack</th>
+                            <th>Visiteurs/j</th>
+                            <th>Croissance</th>
+                            <th>CPU/RAM</th>
+                            <th>Plugins</th>
+                            <th>Marge</th>
+                            <th>Charge</th>
+                            <th>Statut</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if (count($history_predictions) > 0): ?>
+                            <?php foreach ($history_predictions as $pred): ?>
+                                <tr>
+                                    <td class="td-date">
+                                        <?php echo date('d/m/Y', strtotime($pred['created_at'])); ?><br>
+                                        <span style="font-size:11px;color:#888;"><?php echo date('H:i', strtotime($pred['created_at'])); ?></span>
+                                    </td>
+                                    <td><span class="badge-pack"><?php echo strtoupper($pred['wp_type'] ?? 'N/A'); ?></span></td>
+                                    <td class="td-number"><?php echo is_numeric($pred['visitors_per_day']) ? number_format((float)$pred['visitors_per_day']) : ''; ?></td>
+                                    <td class="td-growth"><?php echo $pred['traffic_growth_rate']; ?>%</td>
+                                    <td class="td-usage"><?php echo $pred['cpu_usage_avg']; ?>% / <?php echo $pred['ram_usage_avg']; ?>%</td>
+                                    <td class="td-number"><?php echo $pred['plugin_count']; ?></td>
+                                    <td class="td-score">
+                                        <?php
+                                            $marge = $pred['capacity_margin'] ?? null;
+                                            echo (is_numeric($marge) && $marge !== null) ? number_format((float)$marge, 2) . '%' : 'N/A';
+                                        ?>
+                                    </td>
+                                    <td class="td-number"><?php echo $pred['predicted_load']; ?>%</td>
+                                    <td>
+                                        <span class="badge-status <?php echo $pred['status'] == 'CRITIQUE' ? 'badge-critical' : ($pred['status'] == 'SURVEILLANCE' ? 'badge-warning' : 'badge-optimal'); ?>">
+                                            <?php echo $pred['status']; ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <button class="btn-icon btn-archive" onclick="archiverAnalyse('<?php echo $pred['id']; ?>')" title="Archiver">📦</button>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <tr>
+                                <td colspan="10" class="empty-table-cell">
+                                    <div class="empty-icon">
+                                        <img src="icons/historique.png" alt="Aucun historique" style="width:64px;height:64px;">
+                                    </div>
+                                    <p>Aucune analyse sauvegardée</p>
+                                </td>
+                            </tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
+    <!-- Onglet Corbeille -->
     <div id="corbeille" class="tab-content <?php echo $active_tab === 'corbeille' ? 'active-tab' : ''; ?>" style="<?php echo $active_tab !== 'corbeille' ? 'display:none;' : ''; ?>">
-        <div class="page-header-with-action"><div class="page-title"><h1>Corbeille</h1><p>Éléments supprimés</p></div><div style="height: 20px; width: 80%;"></div><button class="btn-danger" onclick="viderCorbeille()"><span>🗑️</span> Vider la corbeille</button></div>
-        <div class="config-card"><div class="table-wrapper"><table class="history-table"><thead><tr><th>Date</th><th>Pack</th><th>Visiteurs/j</th><th>Croissance</th><th>CPU/RAM</th><th>Plugins</th><th>Score</th><th>Charge</th><th>Statut</th><th>Action</th></tr></thead><tbody>
-            <?php if (count($deleted_sauvegardes) > 0): ?>
-                <?php foreach ($deleted_sauvegardes as $del): ?>
-                    <tr class="tr-deleted">
-                        <td class="td-date"><?php echo date('d/m/Y', strtotime($del['created_at'])); ?><br><span style="font-size:11px;color:#888;"><?php echo date('H:i', strtotime($del['created_at'])); ?></span></td>
-                        <td><?php echo strtoupper($del['wp_type'] ?? 'N/A'); ?></td>
-                        <td class="td-number"><?php echo is_numeric($del['visitors_per_day']) ? number_format((float)$del['visitors_per_day']) : ''; ?></td>
-                        <td class="td-growth"><?php echo $del['traffic_growth_rate']; ?>%</td>
-                        <td class="td-usage"><?php echo $del['cpu_usage_avg']; ?>% / <?php echo $del['ram_usage_avg']; ?>%</td>
-                        <td class="td-number"><?php echo $del['plugin_count']; ?></td>
-                                                <td class="td-score">
-                                                    <?php
-                                                        $r2 = $del['xgboost_score'];
-                                                        echo (is_numeric($r2) && $r2 !== null) ? number_format((float)$r2, 4) : 'N/A';
-                                                    ?>
-                                                </td>
-                        <td class="td-number"><?php echo $del['predicted_load']; ?>%</td>
-                        <td><span class="badge-deleted">🗑️ Supprimé</span></td>
-                        <td><button class="btn-icon btn-restore" onclick="restaurerAnalyse('<?php echo $del['id']; ?>')" title="Restaurer">🔄</button><button class="btn-icon btn-delete-forever" onclick="supprimerDefinitivement('<?php echo $del['id']; ?>')" title="Supprimer">❌</button></td>
-                    </tr>
-                <?php endforeach; ?>
-            <?php else: ?>
-                <tr><td colspan="10" class="empty-table-cell"><div class="empty-icon"><img src="icons/corbeille.png" alt="Corbeille vide" style="width:64px;height:64px;"></div><p>Corbeille vide</p></td></tr>
-            <?php endif; ?>
-        </tbody></table></div></div>
+        <div class="page-header-with-action">
+            <div class="page-title">
+                <h1>Corbeille</h1>
+                <p>Éléments supprimés</p>
+            </div>
+        </div>
+        <div class="table-header-action multiple-buttons">
+            <button class="btn-danger" onclick="viderCorbeille()">
+                <span>🗑️</span> Vider la corbeille
+            </button>
+        </div>
+        <div class="config-card">
+            <div class="table-wrapper">
+                <table class="history-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Pack</th>
+                            <th>Visiteurs/j</th>
+                            <th>Croissance</th>
+                            <th>CPU/RAM</th>
+                            <th>Plugins</th>
+                            <th>Marge</th>
+                            <th>Charge</th>
+                            <th>Statut</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if (count($deleted_sauvegardes) > 0): ?>
+                            <?php foreach ($deleted_sauvegardes as $del): ?>
+                                <tr class="tr-deleted">
+                                    <td class="td-date">
+                                        <?php echo date('d/m/Y', strtotime($del['created_at'])); ?><br>
+                                        <span style="font-size:11px;color:#888;"><?php echo date('H:i', strtotime($del['created_at'])); ?></span>
+                                    </td>
+                                    <td><?php echo strtoupper($del['wp_type'] ?? 'N/A'); ?></td>
+                                    <td class="td-number"><?php echo is_numeric($del['visitors_per_day']) ? number_format((float)$del['visitors_per_day']) : ''; ?></td>
+                                    <td class="td-growth"><?php echo $del['traffic_growth_rate']; ?>%</td>
+                                    <td class="td-usage"><?php echo $del['cpu_usage_avg']; ?>% / <?php echo $del['ram_usage_avg']; ?>%</td>
+                                    <td class="td-number"><?php echo $del['plugin_count']; ?></td>
+                                    <td class="td-score">
+                                        <?php
+                                            $marge = $del['capacity_margin'] ?? null;
+                                            echo (is_numeric($marge) && $marge !== null) ? number_format((float)$marge, 2) . '%' : 'N/A';
+                                        ?>
+                                    </td>
+                                    <td class="td-number"><?php echo $del['predicted_load']; ?>%</td>
+                                    <td><span class="badge-deleted">🗑️ Supprimé</span></td>
+                                    <td>
+                                        <button class="btn-icon btn-restore" onclick="restaurerAnalyse('<?php echo $del['id']; ?>')" title="Restaurer">🔄</button>
+                                        <button class="btn-icon btn-delete-forever" onclick="supprimerDefinitivement('<?php echo $del['id']; ?>')" title="Supprimer">❌</button>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <tr>
+                                <td colspan="10" class="empty-table-cell">
+                                    <div class="empty-icon">
+                                        <img src="icons/corbeille.png" alt="Corbeille vide" style="width:64px;height:64px;">
+                                    </div>
+                                    <p>Corbeille vide</p>
+                                </td>
+                            </tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
 </div>
@@ -592,7 +1003,6 @@ window.addEventListener('popstate', function(event) {
     if (event.state && event.state.tab) {
         showTab(event.state.tab);
     } else {
-        // Récupérer depuis l'URL
         var urlParams = new URLSearchParams(window.location.search);
         var tabFromUrl = urlParams.get('tab');
         var validTabs = ['dashboard', 'resultats', 'sauvegardes', 'historique', 'corbeille'];
@@ -617,10 +1027,14 @@ function getFormParams() {
     var start = document.getElementById('peak_hours_start').value;
     var end = document.getElementById('peak_hours_end').value;
     var peakHours = 4;
-    if (start && end) { peakHours = Math.max(1, parseInt(end.split(':')[0]) - parseInt(start.split(':')[0])); }
+    if (start && end) { 
+        peakHours = Math.max(1, parseInt(end.split(':')[0]) - parseInt(start.split(':')[0])); 
+    }
     var heavyPlugins = [];
     var checkboxes = document.querySelectorAll('#heavy_plugins_group input[type="checkbox"]:checked');
-    for (var i = 0; i < checkboxes.length; i++) { heavyPlugins.push(checkboxes[i].value); }
+    for (var i = 0; i < checkboxes.length; i++) { 
+        heavyPlugins.push(checkboxes[i].value); 
+    }
     return {
         cpu_usage_avg: parseFloat(document.getElementById('cpu_usage_avg').value) || 0,
         cpu_usage_peak: parseFloat(document.getElementById('cpu_usage_peak').value) || 0,
@@ -634,7 +1048,9 @@ function getFormParams() {
         visitors_per_day: parseFloat(document.getElementById('visitors_per_day').value) || 0,
         pageviews_per_day: parseFloat(document.getElementById('pageviews_per_day').value) || 0,
         traffic_growth_rate: parseFloat(document.getElementById('traffic_growth_rate').value) || 0,
-        peak_hours_start: start, peak_hours_end: end, peak_hours: peakHours,
+        peak_hours_start: start, 
+        peak_hours_end: end, 
+        peak_hours: peakHours,
         plugin_count: parseFloat(document.getElementById('plugin_count').value) || 0,
         heavy_plugins: heavyPlugins.join(','),
         php_version: document.getElementById('php_version').value,
@@ -654,27 +1070,39 @@ function validateParams(params) {
 
 function resetCurrentAnalysis() {
     if (!confirm('⚠️ Voulez-vous réinitialiser les résultats courants ?\n\nCette action va :\n- Effacer les résultats affichés\n- Vider les champs du formulaire\n- Supprimer les images générées\n\nLes sauvegardes dans l\'historique ne seront pas supprimées.')) return;
+    
     var btn = document.getElementById('resetBtn');
-    btn.disabled = true; btn.innerHTML = '⏳ Réinitialisation...'; btn.style.opacity = '0.7';
+    btn.disabled = true; 
+    btn.innerHTML = '⏳ Réinitialisation...'; 
+    btn.style.opacity = '0.7';
+    
     viderTousLesChamps();
     localStorage.removeItem('lastPrediction');
     sessionStorage.removeItem('lastPrediction');
     sessionStorage.removeItem('lastFormParams');
     currentPrediction = null;
+    
     document.getElementById('noResults').style.display = 'block';
     document.getElementById('resultsContainer').style.display = 'none';
     document.getElementById('loadingResults').style.display = 'none';
+    
     fetch('http://localhost:8000/run/cleanup-all-images', { method: 'POST' })
     .then(function(r) { return r.json(); })
-    .then(function() { return fetch('http://localhost:8000/run/cleanup-json', { method: 'POST' }); })
+    .then(function() { 
+        return fetch('http://localhost:8000/run/cleanup-json', { method: 'POST' }); 
+    })
     .then(function() {
         showToast('✅ Résultats réinitialisés avec succès !');
         showTab('dashboard');
-        btn.disabled = false; btn.innerHTML = '<span>🔄</span> Réinitialiser'; btn.style.opacity = '1';
+        btn.disabled = false; 
+        btn.innerHTML = '<span>🔄</span> Réinitialiser'; 
+        btn.style.opacity = '1';
     })
     .catch(function() {
         showToast('✅ Réinitialisation locale effectuée');
-        btn.disabled = false; btn.innerHTML = '<span>🔄</span> Réinitialiser'; btn.style.opacity = '1';
+        btn.disabled = false; 
+        btn.innerHTML = '<span>🔄</span> Réinitialiser'; 
+        btn.style.opacity = '1';
     });
 }
 
@@ -693,22 +1121,29 @@ function displayResults(data) {
     if (data.predicted_saturation_months == 0) sat = 'SATURÉ';
     var cls = data.status === 'CRITIQUE' ? 'critical' : (data.status === 'SURVEILLANCE' ? 'warning' : 'optimal');
     var col = data.status === 'CRITIQUE' ? '#dc2626' : (data.status === 'SURVEILLANCE' ? '#d97706' : '#10b981');
-    document.getElementById('scoresDisplay').innerHTML = '<div class="scores-grid">'
-        + '<div class="score-item"><div class="score-label">Charge prédite</div><div class="score-value" style="color:' + col + '">' + data.predicted_load + '%</div><div class="gauge"><div class="gauge-fill ' + cls + '" style="width:' + data.predicted_load + '%"></div></div></div>'
-        + '<div class="score-item"><div class="score-label">Marge de capacité restante</div><div class="score-value" style="color:#10b981">' + data.capacity_margin + '%</div><div class="gauge" style="margin-top:10px;"><div class="gauge-fill optimal" style="width:' + data.capacity_margin + '%;background:#10b981;"></div></div></div>'
-        + '<div class="score-item"><div class="score-label">Saturation</div><div class="score-value saturation">' + sat + '</div><span class="badge-status badge-' + cls + '">' + data.status + '</span></div>'
-        + '</div>';
-    document.getElementById('recommendationDisplay').innerHTML = '<div class="recommendation-text">' + (data.recommendation || 'Aucune recommandation.') + '</div>';
+    
+    document.getElementById('scoresDisplay').innerHTML = 
+        '<div class="scores-grid">' +
+        '<div class="score-item"><div class="score-label">Charge prédite</div><div class="score-value" style="color:' + col + '">' + data.predicted_load + '%</div><div class="gauge"><div class="gauge-fill ' + cls + '" style="width:' + data.predicted_load + '%"></div></div></div>' +
+        '<div class="score-item"><div class="score-label">Marge de capacité restante</div><div class="score-value" style="color:#10b981">' + data.capacity_margin + '%</div><div class="gauge" style="margin-top:10px;"><div class="gauge-fill optimal" style="width:' + data.capacity_margin + '%;background:#10b981;"></div></div></div>' +
+        '<div class="score-item"><div class="score-label">Saturation</div><div class="score-value saturation">' + sat + '</div><span class="badge-status badge-' + cls + '">' + data.status + '</span></div>' +
+        '</div>';
+        
+    document.getElementById('recommendationDisplay').innerHTML = 
+        '<div class="recommendation-text">' + (data.recommendation || 'Aucune recommandation.') + '</div>';
 }
 
 function runAnalysis() {
     var params = getFormParams();
     if (!validateParams(params)) return;
+    
     saveFormParamsToStorage();
+    
     document.getElementById('noResults').style.display = 'none';
     document.getElementById('resultsContainer').style.display = 'none';
     document.getElementById('loadingResults').style.display = 'block';
     showTab('resultats');
+    
     fetch("http://localhost:8000/api/save-and-predict-json", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -764,19 +1199,12 @@ function saveCurrentResult() {
     .then(function(res) {
         if (res.success) {
             showToast('✅ Analyse sauvegardée avec succès !');
-            
-            // Réactiver le bouton
             btn.disabled = false;
             btn.innerHTML = '<span>💾</span> Sauvegarder dans l\'historique';
-            
-            // Forcer l'onglet sauvegardes
             sessionStorage.setItem('activeTab', 'sauvegardes');
-            
-            // Recharger après un délai
             setTimeout(function() {
                 window.location.reload();
             }, 1000);
-            
         } else {
             showToast(res.error ? res.error : 'Erreur lors de la sauvegarde', true);
             btn.disabled = false;
@@ -836,7 +1264,6 @@ function ajaxAction(action, id) {
             showToast(res.error ? res.error : 'Erreur', true); 
         }
         
-        // Recharger après un court délai (l'onglet sera conservé via sessionStorage)
         setTimeout(function() {
             window.location.reload();
         }, 1000);
@@ -853,7 +1280,11 @@ document.addEventListener('DOMContentLoaded', function() {
     
     var last = localStorage.getItem('lastPrediction') || sessionStorage.getItem('lastPrediction');
     if (last) {
-        try { currentPrediction = JSON.parse(last); } catch(e) { currentPrediction = null; }
+        try { 
+            currentPrediction = JSON.parse(last); 
+        } catch(e) { 
+            currentPrediction = null; 
+        }
     }
     if (currentPrediction) {
         document.getElementById('noResults').style.display = 'none';
@@ -861,9 +1292,6 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('loadingResults').style.display = 'none';
         displayResults(currentPrediction);
     }
-    
-    // L'onglet actif est déjà défini par PHP via $active_tab
-    // Pas besoin de showTab ici car le PHP a déjà affiché le bon onglet
 });
 
 // Sauvegarder l'onglet avant de quitter la page

@@ -202,25 +202,36 @@ function runGrapheXGBoostModel() {
     .then(function(r) { return r.json(); })
     .then(function(res) {
         console.log('[Graphe] Réponse API:', res);
-        setTimeout(function() {
+        // Rafraîchissement progressif pour s'assurer que toutes les images sont bien générées
+        var refreshCount = 0;
+        var maxRefresh = 8; // 8 tentatives max (environ 8 secondes)
+        function refreshImages() {
             fetch('http://localhost:8000/api/get-images-list')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     var noGraphMsg = document.getElementById('noGraphMessage');
-                    if (data.images && data.images.length > 0) {
+                    if (data.images && data.images.length >= 5) {
                         afficherGraphiques(data.images);
                         if (noGraphMsg) noGraphMsg.style.display = 'none';
+                        // Réactive le bouton UNIQUEMENT quand les 5 images sont affichées
+                        setTimeout(function() {
+                            btn.disabled = false;
+                            btn.innerHTML = '<span>📈</span> Crée Graphes';
+                            clearTimeout(failsafeTimeout);
+                        }, 100);
+                    } else if (refreshCount < maxRefresh) {
+                        refreshCount++;
+                        setTimeout(refreshImages, 1000);
                     } else {
-                        document.getElementById('imagesDisplay').innerHTML = '<div style="text-align:center;padding:40px;color:#888;"><p style="font-size:18px;">Aucun graphique généré</p></div>';
-                        if (noGraphMsg) noGraphMsg.style.display = 'block';
-                    }
-                    setTimeout(function() {
+                        afficherGraphiques(data.images || []);
+                        // Si timeout, réactive le bouton même si toutes les images ne sont pas là
                         btn.disabled = false;
                         btn.innerHTML = '<span>📈</span> Crée Graphes';
                         clearTimeout(failsafeTimeout);
-                    }, 100);
+                    }
                 });
-        }, 1500);
+        }
+        setTimeout(refreshImages, 1500);
         if (res.status !== 'success') {
             document.getElementById('imagesDisplay').innerHTML = '<div style="text-align:center;padding:40px;color:#888;"><p style="font-size:18px;">Erreur de génération</p><p style="font-size:14px;">Réessayez</p></div>';
             btn.disabled = false;
@@ -241,10 +252,10 @@ function runGrapheXGBoostModel() {
 function afficherGraphiques(images) {
     var order = [
         {match: function(img) { return img.filename.startsWith('partial_dependence_all'); }, label: '📊 Partial Dependence', large: false},
-        {match: function(img) { return img.filename.startsWith('response_time_projection'); }, label: '⏱️ Projection Temps de Réponse', large: false},
+        {match: function(img) { return img.filename.startsWith('shap_force_plot'); }, label: '🧬 SHAP Force Plot', large: false},
         {match: function(img) { return img.filename.startsWith('saturation_evolution'); }, label: '⚡ Saturation', large: true},
-        {match: function(img) { return img.filename.startsWith('charge_horaire'); }, label: '🕒 Charge horaire', large: false},
-        {match: function(img) { return img.filename.startsWith('charge_par_type'); }, label: '🏷️ Charge par type de site', large: false},
+        {match: function(img) { return img.filename.startsWith('time_series'); }, label: '📈 Séries temporelles', large: false},
+        {match: function(img) { return img.filename.startsWith('decision_boundary'); }, label: '🟧 Decision Boundary', large: false},
         // Ajout d'autres types si besoin
         {match: function(img) { return img.type === 'residus'; }, label: '📉 Résidus', large: false},
         {match: function(img) { return img.type === 'correlation'; }, label: '🔗 Corrélation', large: false},
@@ -274,6 +285,12 @@ function afficherGraphiques(images) {
     
     
     document.getElementById('imagesDisplay').innerHTML = html;
+    // Réinitialise le bouton après affichage réussi
+    var btn = document.getElementById('runGrapheXGBoostBtn');
+    if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span>📈</span> Crée Graphes';
+    }
     console.log('[Graphe] Images affichées:', images);
 }
 </script>
