@@ -61,6 +61,20 @@ try {
 }
 
 // Fonctions de gestion des données
+
+function saveResultJson($pdo, $data, $type = 'resultat') {
+    if ($pdo === null) return false;
+    try {
+        $stmt = $pdo->prepare("INSERT INTO saved_results (id, created_at, data_json, save_type) VALUES (:id, :created_at, :data_json, :save_type)");
+        $stmt->execute([
+            ':id' => uniqid(),
+            ':created_at' => date('Y-m-d H:i:s'),
+            ':data_json' => json_encode($data),
+            ':save_type' => $type
+        ]);
+        return true;
+    } catch (Exception $e) { return false; }
+}
 function getPredictions($pdo) {
     if ($pdo === null || !isset($_SESSION['user'])) return [];
     try {
@@ -111,7 +125,10 @@ function archivePrediction($pdo, $id) {
 }
 
 function deletePermanently($pdo, $id) { if ($pdo === null) return false; try { $pdo->prepare("DELETE FROM deleted_sauvegardes WHERE id = :id")->execute([':id' => $id]); return true; } catch (Exception $e) { return false; } }
-function restorePrediction($pdo, $id) { if ($pdo === null) return false; try { $stmt = $pdo->prepare("SELECT * FROM deleted_sauvegardes WHERE id = :id"); $stmt->execute([':id' => $id]); $pred = $stmt->fetch(PDO::FETCH_ASSOC); if ($pred) { $new_id = uniqid(); $stmt2 = $pdo->prepare("INSERT INTO predictions (id, user, created_at, cpu_usage_avg, cpu_usage_peak, ram_usage_avg, ram_usage_max, disk_usage_avg, disk_usage_max, disk_read_iops, disk_write_iops, response_time, visitors_per_day, pageviews_per_day, traffic_growth_rate, peak_hours_start, peak_hours_end, peak_hours, plugin_count, heavy_plugins, php_version, cache_enabled, cdn_enabled, wp_type, predicted_load, error_rate, saturation_days, saturation_months, saturation_jours, saturation_text, saturation_months_raw, status, recommendation, save_type, is_deleted) VALUES (:id, :user, :created_at, :cpu_usage_avg, :cpu_usage_peak, :ram_usage_avg, :ram_usage_max, :disk_usage_avg, :disk_usage_max, :disk_read_iops, :disk_write_iops, :response_time, :visitors_per_day, :pageviews_per_day, :traffic_growth_rate, :peak_hours_start, :peak_hours_end, :peak_hours, :plugin_count, :heavy_plugins, :php_version, :cache_enabled, :cdn_enabled, :wp_type, :predicted_load, :error_rate, :saturation_days, :saturation_months, :saturation_jours, :saturation_text, :saturation_months_raw, :status, :recommendation, :save_type, 0)"); $stmt2->execute([':id' => $new_id, ':user' => $_SESSION['user'], ':created_at' => $pred['created_at'], ':cpu_usage_avg' => $pred['cpu_usage_avg'], ':cpu_usage_peak' => $pred['cpu_usage_peak'], ':ram_usage_avg' => $pred['ram_usage_avg'], ':ram_usage_max' => $pred['ram_usage_max'], ':disk_usage_avg' => $pred['disk_usage_avg'], ':disk_usage_max' => $pred['disk_usage_max'], ':disk_read_iops' => $pred['disk_read_iops'], ':disk_write_iops' => $pred['disk_write_iops'], ':response_time' => $pred['response_time'], ':visitors_per_day' => $pred['visitors_per_day'], ':pageviews_per_day' => $pred['pageviews_per_day'], ':traffic_growth_rate' => $pred['traffic_growth_rate'], ':peak_hours_start' => $pred['peak_hours_start'], ':peak_hours_end' => $pred['peak_hours_end'], ':peak_hours' => $pred['peak_hours'], ':plugin_count' => $pred['plugin_count'], ':heavy_plugins' => $pred['heavy_plugins'], ':php_version' => $pred['php_version'], ':cache_enabled' => $pred['cache_enabled'], ':cdn_enabled' => $pred['cdn_enabled'], ':wp_type' => $pred['wp_type'], ':predicted_load' => $pred['predicted_load'], ':error_rate' => $pred['error_rate'] ?? '', ':saturation_days' => $pred['saturation_days'] ?? '', ':saturation_months' => $pred['saturation_months'] ?? '', ':saturation_jours' => $pred['saturation_jours'] ?? '', ':saturation_text' => $pred['saturation_text'] ?? '', ':saturation_months_raw' => $pred['saturation_months_raw'] ?? '', ':status' => $pred['status'], ':recommendation' => $pred['recommendation'], ':save_type' => $pred['save_type'] ?? 'Manuel']); $pdo->prepare("DELETE FROM deleted_sauvegardes WHERE id = :id")->execute([':id' => $id]); return true; } return false; } catch (Exception $e) { return false; } }
+function restorePrediction($pdo, $id) { if ($pdo === null) return false; try { $stmt = $pdo->prepare("SELECT * FROM deleted_sauvegardes WHERE id = :id"); $stmt->execute([':id' => $id]); $pred = $stmt->fetch(PDO::FETCH_ASSOC); if ($pred) { $new_id = uniqid(); $stmt2 = $pdo->prepare("INSERT INTO predictions (id, user, created_at, cpu_usage_avg, cpu_usage_peak, ram_usage_avg, ram_usage_max, disk_usage_avg, disk_usage_max, disk_read_iops, disk_write_iops, response_time, visitors_per_day, pageviews_per_day, traffic_growth_rate, peak_hours_start, peak_hours_end, peak_hours, plugin_count, heavy_plugins, php_version, cache_enabled, cdn_enabled, wp_type, predicted_load, error_rate, saturation_days, saturation_months, saturation_jours, saturation_text, saturation_months_raw, status, recommendation, save_type, is_deleted) VALUES (:id, :user, :created_at, :cpu_usage_avg, :cpu_usage_peak, :ram_usage_avg, :ram_usage_max, :disk_usage_avg, :disk_usage_max, :disk_read_iops, :disk_write_iops, :response_time, :visitors_per_day, :pageviews_per_day, :traffic_growth_rate, :peak_hours_start, :peak_hours_end, :peak_hours, :plugin_count, :heavy_plugins, :php_version, :cache_enabled, :cdn_enabled, :wp_type, :predicted_load, :error_rate, :saturation_days, :saturation_months, :saturation_jours, :saturation_text, :saturation_months_raw, :status, :recommendation, :save_type, 0)");
+            $stmt2->execute([':id' => $new_id, ':user' => $_SESSION['user'], ':created_at' => $pred['created_at'], ':cpu_usage_avg' => $pred['cpu_usage_avg'], ':cpu_usage_peak' => $pred['cpu_usage_peak'], ':ram_usage_avg' => $pred['ram_usage_avg'], ':ram_usage_max' => $pred['ram_usage_max'], ':disk_usage_avg' => $pred['disk_usage_avg'], ':disk_usage_max' => $pred['disk_usage_max'], ':disk_read_iops' => $pred['disk_read_iops'], ':disk_write_iops' => $pred['disk_write_iops'], ':response_time' => $pred['response_time'], ':visitors_per_day' => $pred['visitors_per_day'], ':pageviews_per_day' => $pred['pageviews_per_day'], ':traffic_growth_rate' => $pred['traffic_growth_rate'], ':peak_hours_start' => $pred['peak_hours_start'], ':peak_hours_end' => $pred['peak_hours_end'], ':peak_hours' => $pred['peak_hours'], ':plugin_count' => $pred['plugin_count'], ':heavy_plugins' => $pred['heavy_plugins'], ':php_version' => $pred['php_version'], ':cache_enabled' => $pred['cache_enabled'], ':cdn_enabled' => $pred['cdn_enabled'], ':wp_type' => $pred['wp_type'], ':predicted_load' => $pred['predicted_load'], ':error_rate' => $pred['error_rate'] ?? '', ':saturation_days' => $pred['saturation_days'] ?? '', ':saturation_months' => $pred['saturation_months'] ?? '', ':saturation_jours' => $pred['saturation_jours'] ?? '', ':saturation_text' => $pred['saturation_text'] ?? '', ':saturation_months_raw' => $pred['saturation_months_raw'] ?? '', ':status' => $pred['status'], ':recommendation' => $pred['recommendation'], ':save_type' => $pred['save_type'] ?? 'Manuel']);
+            $pdo->prepare("DELETE FROM deleted_sauvegardes WHERE id = :id")->execute([':id' => $id]);
+            return true; } return false; } catch (Exception $e) { return false; } }
 function emptyTrash($pdo) { if ($pdo === null) return false; try { $pdo->prepare("DELETE FROM deleted_sauvegardes")->execute(); return true; } catch (Exception $e) { return false; } }
 
 // Export CSV
@@ -142,6 +159,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
             if ($data['action'] === 'archive' && isset($data['archive_id'])) { ajax_json_response(['success' => archivePrediction($pdo, $data['archive_id'])]); }
             if ($data['action'] === 'restore' && isset($data['restore_id'])) { ajax_json_response(['success' => restorePrediction($pdo, $data['restore_id'])]); }
             if ($data['action'] === 'empty_trash') { ajax_json_response(['success' => emptyTrash($pdo)]); }
+            // Sauvegarde des résultats graphiques ou résultats d'analyse
+            if ($data['action'] === 'save_graphs' && isset($data['graph_urls'])) {
+                $ok = saveResultJson($pdo, $data['graph_urls'], 'graphiques');
+                ajax_json_response(['success' => $ok]);
+            }
+            if ($data['action'] === 'save_result' && isset($data['result_data'])) {
+                $ok = saveResultJson($pdo, $data['result_data'], 'resultat');
+                ajax_json_response(['success' => $ok]);
+            }
+            if ($data['action'] === 'save_params' && isset($data['params_data'])) {
+                $ok = saveResultJson($pdo, $data['params_data'], 'parametres');
+                ajax_json_response(['success' => $ok]);
+            }
         }
         if (isset($data['predicted_load'])) { $prediction = ['id' => uniqid(), 'created_at' => date('Y-m-d H:i:s'), 'cpu_usage_avg' => $data['cpu_usage_avg'] ?? '', 'cpu_usage_peak' => $data['cpu_usage_peak'] ?? '', 'ram_usage_avg' => $data['ram_usage_avg'] ?? '', 'ram_usage_max' => $data['ram_usage_max'] ?? '', 'disk_usage_avg' => $data['disk_usage_avg'] ?? '', 'disk_usage_max' => $data['disk_usage_max'] ?? '', 'disk_read_iops' => $data['disk_read_iops'] ?? '', 'disk_write_iops' => $data['disk_write_iops'] ?? '', 'response_time' => $data['response_time'] ?? '', 'visitors_per_day' => $data['visitors_per_day'] ?? '', 'pageviews_per_day' => $data['pageviews_per_day'] ?? '', 'traffic_growth_rate' => $data['traffic_growth_rate'] ?? '', 'peak_hours_start' => $data['peak_hours_start'] ?? '', 'peak_hours_end' => $data['peak_hours_end'] ?? '', 'peak_hours' => $data['peak_hours'] ?? '', 'plugin_count' => $data['plugin_count'] ?? '', 'heavy_plugins' => $data['heavy_plugins'] ?? '', 'php_version' => $data['php_version'] ?? '', 'cache_enabled' => $data['cache_enabled'] ?? '', 'cdn_enabled' => $data['cdn_enabled'] ?? '', 'wp_type' => $data['wp_type'] ?? '', 'predicted_load' => $data['predicted_load'] ?? '', 'error_rate' => $data['error_rate'] ?? '', 'saturation_days' => $data['saturation_days'] ?? '', 'saturation_months' => $data['saturation_months'] ?? '', 'saturation_jours' => $data['saturation_jours'] ?? '', 'saturation_text' => $data['saturation_text'] ?? '', 'saturation_months_raw' => $data['saturation_months_raw'] ?? '', 'status' => $data['status'] ?? '', 'recommendation' => $data['recommendation'] ?? '', 'save_type' => 'Manuel']; $errorMsg = null; ajax_json_response(['success' => savePrediction($pdo, $prediction, $errorMsg), 'error' => $errorMsg]); }
         ajax_json_response(['status' => 'success', 'message' => 'OK']);
@@ -326,10 +356,10 @@ var savedGraphUrls = null;
 
 if (window.history && window.history.replaceState) { window.history.replaceState({tab:'<?php echo $active_tab; ?>'},'',window.location.pathname+'?tab=<?php echo $active_tab; ?>'); }
 
-function saveFormParamsToStorage() { localStorage.setItem('lastFormParams', JSON.stringify(getFormParams())); }
+function saveFormParamsToStorage() { sessionStorage.setItem('lastFormParams', JSON.stringify(getFormParams())); }
 
 function restoreFormParamsFromStorage() {
-    var s = localStorage.getItem('lastFormParams');
+    var s = sessionStorage.getItem('lastFormParams');
     if (s) { try { var p = JSON.parse(s); if(p.visitors_per_day) document.getElementById('visitors_per_day').value = p.visitors_per_day; if(p.pageviews_per_day) document.getElementById('pageviews_per_day').value = p.pageviews_per_day; if(p.traffic_growth_rate) document.getElementById('traffic_growth_rate').value = p.traffic_growth_rate; if(p.cpu_usage_avg) document.getElementById('cpu_usage_avg').value = p.cpu_usage_avg; if(p.cpu_usage_peak) document.getElementById('cpu_usage_peak').value = p.cpu_usage_peak; if(p.ram_usage_avg) document.getElementById('ram_usage_avg').value = p.ram_usage_avg; if(p.ram_usage_max) document.getElementById('ram_usage_max').value = p.ram_usage_max; if(p.disk_usage_avg) document.getElementById('disk_usage_avg').value = p.disk_usage_avg; if(p.disk_usage_max) document.getElementById('disk_usage_max').value = p.disk_usage_max; if(p.disk_read_iops) document.getElementById('disk_read_iops').value = p.disk_read_iops; if(p.disk_write_iops) document.getElementById('disk_write_iops').value = p.disk_write_iops; if(p.response_time) document.getElementById('response_time').value = p.response_time; if(p.plugin_count) document.getElementById('plugin_count').value = p.plugin_count; if(p.peak_hours_start) document.getElementById('peak_hours_start').value = p.peak_hours_start; if(p.peak_hours_end) document.getElementById('peak_hours_end').value = p.peak_hours_end; if(p.php_version&&p.php_version!=='none') document.getElementById('php_version').value = p.php_version; if(p.cache_enabled&&p.cache_enabled!=='none') document.getElementById('cache_enabled').value = p.cache_enabled; if(p.cdn_enabled&&p.cdn_enabled!=='none') document.getElementById('cdn_enabled').value = p.cdn_enabled; if(p.wp_type&&p.wp_type!=='none') document.getElementById('wp_type').value = p.wp_type; if(p.heavy_plugins) { var pl=p.heavy_plugins.split(','); var c=document.querySelectorAll('#heavy_plugins_group input[type="checkbox"]'); for(var i=0;i<c.length;i++) c[i].checked=pl.indexOf(c[i].value)!==-1; } } catch(e) {} }
 }
 
@@ -339,7 +369,7 @@ function showTab(tabId) {
     var target = document.getElementById(tabId); if(target){target.classList.add('active-tab');target.style.display='block';}
     var tabNames=['dashboard','resultats','graphiques','sauvegardes','historique','corbeille'];
     var index=tabNames.indexOf(tabId); if(index>=0&&menus[index]) menus[index].classList.add('active-menu');
-    localStorage.setItem('activeTab',tabId);
+    sessionStorage.setItem('activeTab',tabId);
     window.history.pushState({tab:tabId},'',window.location.pathname+'?tab='+tabId);
 }
 
@@ -356,7 +386,7 @@ function showToast(message,isError){
 
 function showValidationError(message){
     var errMsg=document.getElementById('validationError');
-    document.getElementById('validationErrorText').textContent='⚠️ '+message;
+    document.getElementById('validationErrorText').textContent=message;
     errMsg.classList.add('show');
     setTimeout(function(){errMsg.classList.remove('show');},5000);
 }
@@ -453,16 +483,36 @@ function viderTousLesChamps(){
     var selects=document.querySelectorAll('select');for(var i=0;i<selects.length;i++)selects[i].selectedIndex=0;
 }
 
+function resetResultsAndGraphsForNewPrediction(){
+    currentPrediction = null;
+    savedGraphUrls = null;
+    sessionStorage.removeItem('lastPrediction');
+    sessionStorage.removeItem('savedGraphUrls');
+
+    document.getElementById('noResults').style.display = 'none';
+    document.getElementById('resultsContainer').style.display = 'none';
+    document.getElementById('loadingResults').style.display = 'block';
+    document.getElementById('scoresDisplay').innerHTML = '';
+    document.getElementById('recommendationDisplay').innerHTML = '';
+
+    document.getElementById('noGraphMessage').style.display = 'block';
+    document.getElementById('generatedGraphsContainer').style.display = 'none';
+    document.getElementById('generatedGraphsContainer').innerHTML = '';
+    document.getElementById('btnCreateGraph').disabled = false;
+    document.getElementById('btnCreateGraph').textContent = '📊 Créer les graphiques';
+    document.getElementById('btnCreateGraph').classList.remove('ready');
+}
+
 function resetCurrentAnalysis(){
     if(!confirm("⚠️ Voulez-vous réinitialiser TOUT ?\n\nCette action va :\n- Effacer les résultats affichés\n- Vider les champs du formulaire\n- Supprimer TOUS les graphiques générés\n- Supprimer tous les paramètres sauvegardés\n\nLes sauvegardes dans l'historique ne seront pas supprimées.")) return;
     var btn=document.getElementById('resetBtn');btn.disabled=true;btn.innerHTML='⏳ Réinitialisation...';btn.style.opacity='0.7';
     viderTousLesChamps();
-    localStorage.removeItem('lastPrediction');localStorage.removeItem('lastFormParams');localStorage.removeItem('activeTab');localStorage.removeItem('savedGraphUrls');
+    sessionStorage.removeItem('lastPrediction');sessionStorage.removeItem('lastFormParams');sessionStorage.removeItem('activeTab');sessionStorage.removeItem('savedGraphUrls');
     currentPrediction=null;savedGraphUrls=null;
     document.getElementById('noResults').style.display='block';document.getElementById('resultsContainer').style.display='none';document.getElementById('loadingResults').style.display='none';
     document.getElementById('noGraphMessage').style.display='block';document.getElementById('generatedGraphsContainer').style.display='none';document.getElementById('generatedGraphsContainer').innerHTML='';
     document.getElementById('btnCreateGraph').disabled=false;document.getElementById('btnCreateGraph').textContent='📊 Créer les graphiques';
-    document.getElementById('btnCreateGraph').classList.remove('ready');
+    document.getElementById('btnCreateGraph').classList.add('ready');
     fetch('http://localhost:8000/api/reset/parameters-and-images',{method:'POST',headers:{'Content-Type':'application/json'}})
     .then(function(r){return r.json();})
     .then(function(data){
@@ -479,19 +529,24 @@ function generateGraphsFromResults() {
     btn.disabled = true; btn.textContent = '⏳ Génération en cours...'; btn.classList.remove('ready');
     document.getElementById('noGraphMessage').style.display = 'none';
     document.getElementById('generatedGraphsContainer').style.display = 'none';
-    
     fetch('http://localhost:8000/api/generate/analysis-graphs', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
     .then(function(response) { return response.json(); })
     .then(function(data) {
         if (data.status === 'success') {
             var graphCount = Object.keys(data.graphs || {}).length;
             savedGraphUrls = data.graph_urls;
-            localStorage.setItem('savedGraphUrls', JSON.stringify(data.graph_urls));
+            sessionStorage.setItem('savedGraphUrls', JSON.stringify(data.graph_urls));
             displayGeneratedGraphs(data);
             btn.disabled = false;
             btn.textContent = '🔄 Recréer les graphiques';
             btn.classList.add('ready');
             showToast('✅ ' + graphCount + ' graphiques générés avec succès !');
+            // Sauvegarde automatique des graphiques dans la base
+            fetch('dashboard.php',{
+                method:'POST',
+                headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+                body:JSON.stringify({action:'save_graphs',graph_urls:data.graph_urls})
+            });
         } else {
             showToast('❌ ' + (data.message || 'Erreur lors de la génération'), true);
             btn.disabled = false;
@@ -526,12 +581,29 @@ function displayResults(data){
     var pl=parseFloat(data.predicted_load)||0;
     var sh='<div class="scores-grid"><div class="score-item"><div class="score-label">Charge prédite</div><div class="score-value" style="color:'+col+'">'+pl.toFixed(1)+'%</div></div><div class="score-item"><div class="score-label">Saturation estimée</div><div class="score-value saturation">'+sat+'</div>';
     if(data.saturation_days!==undefined) sh+='<div style="font-size:0.85em;color:#888;margin-top:4px;">'+parseFloat(data.saturation_days).toFixed(0)+' jours</div>';
-    sh+='<span class="badge-status badge-'+cls+'" style="margin-top:8px;">'+st+'</span></div>';
+    // Afficher le statut sans les pastilles (🟡, 🔴, etc.)
+    var stText = st.replace(/[🟡🔴🟢]/g, '').trim();
+    sh+='<span class="badge-status badge-'+cls+'" style="margin-top:8px;">'+stText+'</span></div>';
     if(data.error_rate!==undefined) sh+='<div class="score-item"><div class="score-label">Taux d\'erreur estimé</div><div class="score-value" style="color:#f59e0b">'+parseFloat(data.error_rate).toFixed(1)+'%</div></div>';
     sh+='</div>';document.getElementById('scoresDisplay').innerHTML=sh;
-    var rh='';if(cls==='critical') rh+='<div class="recommendation-global" style="color:#dc2626;font-weight:600;margin-bottom:12px;">⚠️ Situation critique - Action immédiate requise</div>';else if(cls==='warning') rh+='<div class="recommendation-global" style="color:#d97706;font-weight:600;margin-bottom:12px;">⚠️ Surveillance recommandée</div>';
-    rh+='<div class="recommendation-text" style="font-size:1.05em;line-height:1.6;">'+(data.recommendation||'Aucune recommandation spécifique.')+'</div>';
-    document.getElementById('recommendationDisplay').innerHTML=rh;
+    var rh = '';
+    var badge = '';
+    if (cls === 'critical') {
+        badge = '🔴 ';
+        rh += '<div class="recommendation-global" style="color:#dc2626;font-weight:600;margin-bottom:12px;"></div>';
+    } else if (cls === 'warning') {
+        badge = '🟡 ';
+        rh += '<div class="recommendation-global" style="color:#d97706;font-weight:600;margin-bottom:12px;"></div>';
+    } else {
+        badge = '🟢 ';
+    }
+    var rec = data.recommendation || 'Aucune recommandation spécifique.';
+    // Supprimer la phrase "- Marge de ... avant saturation"
+    if (typeof rec === 'string') {
+        rec = rec.replace(/-?\\s*Marge de [^<]* avant saturation/g, '');
+    }
+    rh += '<div class="recommendation-text" style="font-size:1.05em;line-height:1.6;">' + badge + rec + '</div>';
+    document.getElementById('recommendationDisplay').innerHTML = rh;
     
     // NE PAS cacher les graphiques s'ils existent déjà
     if (savedGraphUrls && Object.keys(savedGraphUrls).length > 0) {
@@ -552,13 +624,32 @@ function displayResults(data){
 function runAnalysis(){
     var params=getFormParams();if(!validateParams(params))return;
     saveFormParamsToStorage();
-    document.getElementById('noResults').style.display='none';document.getElementById('resultsContainer').style.display='none';document.getElementById('loadingResults').style.display='block';
+    resetResultsAndGraphsForNewPrediction();
     showTab('resultats');
     fetch("http://localhost:8000/api/save-and-predict-json",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(params)})
     .then(function(r){return r.json();})
     .then(function(res){
         document.getElementById('loadingResults').style.display='none';
-        if(res.status==="success"&&res.prediction&&res.prediction.output){currentPrediction=res.prediction.output.result;displayResults(currentPrediction);document.getElementById('resultsContainer').style.display='block';document.getElementById('noResults').style.display='none';showToast('✅ Prédiction terminée !');localStorage.setItem('lastPrediction',JSON.stringify(currentPrediction));}
+        if(res.status==="success"&&res.prediction&&res.prediction.output){
+            currentPrediction=res.prediction.output.result;
+            displayResults(currentPrediction);
+            document.getElementById('resultsContainer').style.display='block';
+            document.getElementById('noResults').style.display='none';
+            showToast('✅ Prédiction terminée !');
+            sessionStorage.setItem('lastPrediction',JSON.stringify(currentPrediction));
+            // Sauvegarde automatique des paramètres
+            fetch('dashboard.php',{
+                method:'POST',
+                headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+                body:JSON.stringify({action:'save_params',params_data:params})
+            });
+            // Sauvegarde automatique du résultat
+            fetch('dashboard.php',{
+                method:'POST',
+                headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+                body:JSON.stringify({action:'save_result',result_data:currentPrediction})
+            });
+        }
         else{showToast('❌ Erreur de prédiction',true);document.getElementById('resultsContainer').style.display='block';}
     })
     .catch(function(err){document.getElementById('loadingResults').style.display='none';showToast('❌ API indisponible',true);});
@@ -591,8 +682,8 @@ document.getElementById('resetBtn').addEventListener('click',function(e){e.preve
 document.addEventListener('DOMContentLoaded',function(){
     restoreFormParamsFromStorage();
     
-    // D'ABORD restaurer les graphiques depuis localStorage
-    var savedGraphs = localStorage.getItem('savedGraphUrls');
+    // D'ABORD restaurer les graphiques depuis sessionStorage
+    var savedGraphs = sessionStorage.getItem('savedGraphUrls');
     if (savedGraphs) {
         try {
             savedGraphUrls = JSON.parse(savedGraphs);
@@ -607,7 +698,7 @@ document.addEventListener('DOMContentLoaded',function(){
     }
     
     // ENSUITE restaurer la prédiction
-    var last = localStorage.getItem('lastPrediction');
+    var last = sessionStorage.getItem('lastPrediction');
     if (last) {
         try {
             currentPrediction = JSON.parse(last);
@@ -618,6 +709,18 @@ document.addEventListener('DOMContentLoaded',function(){
         } catch(e) {
             currentPrediction = null;
         }
+    }
+});
+</script>
+<script>
+// Suppression automatique des résultats et graphiques uniquement à la fermeture de l’onglet (pas lors d’un F5/rechargement)
+window.addEventListener('beforeunload', function(e) {
+    var nav = performance.getEntriesByType("navigation")[0];
+    if (!nav || nav.type !== "reload") {
+        sessionStorage.removeItem('lastPrediction');
+        sessionStorage.removeItem('savedGraphUrls');
+        sessionStorage.removeItem('lastFormParams');
+        sessionStorage.removeItem('activeTab');
     }
 });
 </script>
