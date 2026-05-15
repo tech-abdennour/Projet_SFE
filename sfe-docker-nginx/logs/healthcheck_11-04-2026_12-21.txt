@@ -1,0 +1,5 @@
+[2026-04-11 12:21:01] 🔍 Vérification des services Docker
+[2026-04-11 12:21:01] ✅ nginx_web en ligne
+[2026-04-11 12:21:01] ✅ php_fpm en ligne
+[2026-04-11 12:21:01] ✅ mariadb_db en ligne
+----------------------------------------
