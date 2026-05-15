@@ -34,29 +34,17 @@ HEAVY_PLUGIN_OPTIONS = [
 
 PHP_VERSIONS = ["7.4", "8.0", "8.1", "8.2", "8.3"]
 WP_TYPES = ["small", "medium", "performance"]
+PLAN_LABELS = ["small", "medium", "performance"]
 
-DEFAULTS = {
-    "visitors_per_day": 5000,
-    "pageviews_per_day": 150,
-    "traffic_growth_rate": 15,
-    "peak_hours_start": "09:00",
-    "peak_hours_end": "18:00",
-    "cpu_usage_avg": 45,
-    "cpu_usage_peak": 75,
-    "ram_usage_avg": 60,
-    "ram_usage_max": 85,
-    "disk_usage_avg": 45,
-    "disk_usage_max": 70,
-    "response_time": 350,
-    "disk_read_iops": 120,
-    "disk_write_iops": 80,
-    "plugin_count": 25,
-    "heavy_plugins": [],
-    "php_version": "8.2",
-    "cache_enabled": "oui",
-    "cdn_enabled": "oui",
-    "wp_type": "medium",
+# Correspondance Plan → Score de charge estimé (milieu de la plage)
+PLAN_TO_LOAD_SCORE = {
+    "small": 17.5,        # Milieu de [0, 35]
+    "medium": 50.0,       # Milieu de [35, 65]
+    "performance": 82.5,  # Milieu de [65, 100]
 }
+
+# Seuils de classification
+PLAN_THRESHOLDS = [35, 65]
 
 
 def load_model() -> tuple[Any | None, list[str] | None, dict[str, Any] | None]:
@@ -75,6 +63,8 @@ def load_model() -> tuple[Any | None, list[str] | None, dict[str, Any] | None]:
         metadata = {}
 
     print(f"Modèle chargé depuis {MODEL_PATH}", file=sys.stderr)
+    print(f"Type de modèle: {type(model).__name__}", file=sys.stderr)
+    
     return model, feature_columns, metadata
 
 
@@ -97,91 +87,120 @@ def load_params(filepath: Path) -> dict[str, Any]:
     return data.get("parameters", data.get("params", data))
 
 
-def to_float(value: Any, default: float) -> float:
-    if value is None or value == "":
-        return float(default)
-
+def to_float(value: Any, default: float = 0.0) -> float:
+    if value is None:
+        return default
     try:
         return float(value)
     except (TypeError, ValueError):
-        return float(default)
-
-
-def clean_select(value: Any, default: str) -> str:
-    if value is None:
         return default
 
+
+def clean_select(value: Any, default: str = None) -> str | None:
+    if value is None:
+        return default
     value = str(value).strip()
     if value == "" or value.lower() == "none":
         return default
-
     return value
 
 
-def time_to_minutes(value: Any, default: str) -> int:
-    value = clean_select(value, default)
-
-    try:
-        hour, minute = value.split(":")[:2]
-        return int(hour) * 60 + int(minute)
-    except (ValueError, AttributeError):
-        hour, minute = default.split(":")
-        return int(hour) * 60 + int(minute)
+def time_to_minutes(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            hour, minute = value.split(":")[:2]
+            return int(hour) * 60 + int(minute)
+        except (ValueError, AttributeError):
+            return None
+    return None
 
 
 def normalize_heavy_plugins(value: Any) -> list[str]:
     if value is None:
         return []
-
     if isinstance(value, list):
         return [str(item).strip().lower() for item in value if str(item).strip()]
-
     return [item.strip().lower() for item in str(value).split(",") if item.strip()]
 
 
 def normalize_params(params: dict[str, Any]) -> dict[str, Any]:
     normalized = {
-        "visitors_per_day": to_float(params.get("visitors_per_day"), DEFAULTS["visitors_per_day"]),
-        "pageviews_per_day": to_float(params.get("pageviews_per_day"), DEFAULTS["pageviews_per_day"]),
-        "traffic_growth_rate": to_float(params.get("traffic_growth_rate"), DEFAULTS["traffic_growth_rate"]),
-        "peak_hours_start": clean_select(params.get("peak_hours_start"), DEFAULTS["peak_hours_start"]),
-        "peak_hours_end": clean_select(params.get("peak_hours_end"), DEFAULTS["peak_hours_end"]),
-        "cpu_usage_avg": to_float(params.get("cpu_usage_avg"), DEFAULTS["cpu_usage_avg"]),
-        "cpu_usage_peak": to_float(params.get("cpu_usage_peak"), DEFAULTS["cpu_usage_peak"]),
-        "ram_usage_avg": to_float(params.get("ram_usage_avg"), DEFAULTS["ram_usage_avg"]),
-        "ram_usage_max": to_float(params.get("ram_usage_max"), DEFAULTS["ram_usage_max"]),
-        "disk_usage_avg": to_float(params.get("disk_usage_avg"), DEFAULTS["disk_usage_avg"]),
-        "disk_usage_max": to_float(params.get("disk_usage_max"), DEFAULTS["disk_usage_max"]),
-        "response_time": to_float(params.get("response_time"), DEFAULTS["response_time"]),
-        "disk_read_iops": to_float(params.get("disk_read_iops"), DEFAULTS["disk_read_iops"]),
-        "disk_write_iops": to_float(params.get("disk_write_iops"), DEFAULTS["disk_write_iops"]),
-        "plugin_count": to_float(params.get("plugin_count"), DEFAULTS["plugin_count"]),
-        "heavy_plugins": normalize_heavy_plugins(params.get("heavy_plugins", DEFAULTS["heavy_plugins"])),
-        "php_version": clean_select(params.get("php_version"), DEFAULTS["php_version"]),
-        "cache_enabled": clean_select(params.get("cache_enabled"), DEFAULTS["cache_enabled"]),
-        "cdn_enabled": clean_select(params.get("cdn_enabled"), DEFAULTS["cdn_enabled"]),
-        "wp_type": clean_select(params.get("wp_type"), DEFAULTS["wp_type"]),
+        "visitors_per_day": to_float(params.get("visitors_per_day")),
+        "pageviews_per_day": to_float(params.get("pageviews_per_day")),
+        "traffic_growth_rate": to_float(params.get("traffic_growth_rate")),
+        "peak_hours_start": clean_select(params.get("peak_hours_start")),
+        "peak_hours_end": clean_select(params.get("peak_hours_end")),
+        "cpu_usage_avg": to_float(params.get("cpu_usage_avg")),
+        "cpu_usage_peak": to_float(params.get("cpu_usage_peak")),
+        "ram_usage_avg": to_float(params.get("ram_usage_avg")),
+        "ram_usage_max": to_float(params.get("ram_usage_max")),
+        "disk_usage_avg": to_float(params.get("disk_usage_avg")),
+        "disk_usage_max": to_float(params.get("disk_usage_max")),
+        "response_time": to_float(params.get("response_time")),
+        "disk_read_iops": to_float(params.get("disk_read_iops")),
+        "disk_write_iops": to_float(params.get("disk_write_iops")),
+        "plugin_count": to_float(params.get("plugin_count")),
+        "heavy_plugins": normalize_heavy_plugins(params.get("heavy_plugins")),
+        "php_version": clean_select(params.get("php_version")),
+        "cache_enabled": clean_select(params.get("cache_enabled")),
+        "cdn_enabled": clean_select(params.get("cdn_enabled")),
+        "wp_type": clean_select(params.get("wp_type")),
     }
-
-    if normalized["php_version"] not in PHP_VERSIONS:
-        normalized["php_version"] = DEFAULTS["php_version"]
-
-    if normalized["cache_enabled"] not in ["oui", "non"]:
-        normalized["cache_enabled"] = DEFAULTS["cache_enabled"]
-
-    if normalized["cdn_enabled"] not in ["oui", "non"]:
-        normalized["cdn_enabled"] = DEFAULTS["cdn_enabled"]
-
-    if normalized["wp_type"] not in WP_TYPES:
-        normalized["wp_type"] = DEFAULTS["wp_type"]
-
     return normalized
+
+
+def calculate_load_score_from_params(normalized: dict[str, Any]) -> float:
+    """
+    Calcule un score de charge estimé basé sur les paramètres normalisés.
+    C'est une approximation basée sur la logique métier des plans d'hébergement.
+    """
+    score = 0.0
+    
+    # Facteur trafic (0-35 points)
+    visitors = normalized["visitors_per_day"]
+    if visitors > 0:
+        # Small: max 2000, Medium: max 15000, Performance: max 150000
+        traffic_ratio = min(visitors / 150000, 1.0)
+        score += traffic_ratio * 35
+    
+    # Facteur CPU (0-25 points)
+    cpu_avg = normalized["cpu_usage_avg"]
+    cpu_peak = normalized["cpu_usage_peak"]
+    score += (cpu_avg / 100) * 15
+    score += (cpu_peak / 100) * 10
+    
+    # Facteur RAM (0-15 points)
+    ram_avg = normalized["ram_usage_avg"]
+    ram_max = normalized["ram_usage_max"]
+    score += (ram_avg / 100) * 8
+    score += (ram_max / 100) * 7
+    
+    # Facteur plugins (0-10 points)
+    plugin_count = normalized["plugin_count"]
+    heavy_plugins_count = len(normalized["heavy_plugins"])
+    score += min((plugin_count / 50) * 5, 5)
+    score += min(heavy_plugins_count * 2, 5)
+    
+    # Facteur croissance (0-10 points)
+    growth = normalized["traffic_growth_rate"]
+    score += min((growth / 85) * 10, 10)
+    
+    # Facteur performance (0-5 points)
+    response_time = normalized["response_time"]
+    score += min((response_time / 5000) * 5, 5)
+    
+    return round(min(max(score, 1.0), 100.0), 2)
 
 
 def prepare_features(params: dict[str, Any], feature_columns: list[str]) -> tuple[pd.DataFrame, dict[str, Any]]:
     normalized = normalize_params(params)
     heavy_plugins = set(normalized["heavy_plugins"])
 
+    start_minutes = time_to_minutes(normalized["peak_hours_start"])
+    end_minutes = time_to_minutes(normalized["peak_hours_end"])
+    
     row = {
         "visitors_per_day": normalized["visitors_per_day"],
         "pageviews_per_day": normalized["pageviews_per_day"],
@@ -196,35 +215,41 @@ def prepare_features(params: dict[str, Any], feature_columns: list[str]) -> tupl
         "disk_read_iops": normalized["disk_read_iops"],
         "disk_write_iops": normalized["disk_write_iops"],
         "plugin_count": normalized["plugin_count"],
-        "peak_hours_start_minutes": time_to_minutes(
-            normalized["peak_hours_start"],
-            DEFAULTS["peak_hours_start"],
-        ),
-        "peak_hours_end_minutes": time_to_minutes(
-            normalized["peak_hours_end"],
-            DEFAULTS["peak_hours_end"],
-        ),
+        "peak_hours_start_minutes": start_minutes if start_minutes is not None else 0,
+        "peak_hours_end_minutes": end_minutes if end_minutes is not None else 0,
+        "heavy_plugins_sum": float(len(heavy_plugins)),
+        "wp_facteur": (normalized["visitors_per_day"] * 0.0001 + 
+                       normalized["plugin_count"] * 0.5 + 
+                       len(heavy_plugins) * 2),
     }
 
-    row["peak_duration_minutes"] = max(
-        0,
-        row["peak_hours_end_minutes"] - row["peak_hours_start_minutes"],
-    )
-
+    # One-hot encoding des heavy plugins
     for plugin in HEAVY_PLUGIN_OPTIONS:
         row[f"heavy_plugin_{plugin}"] = 1 if plugin in heavy_plugins else 0
 
+    # One-hot encoding des versions PHP
     for version in PHP_VERSIONS:
-        row[f"php_version_{version}"] = 1 if normalized["php_version"] == version else 0
+        row[f"php_{version}"] = 1 if normalized["php_version"] == version else 0
 
+    # One-hot encoding cache/cdn
     for value in ["non", "oui"]:
-        row[f"cache_enabled_{value}"] = 1 if normalized["cache_enabled"] == value else 0
-        row[f"cdn_enabled_{value}"] = 1 if normalized["cdn_enabled"] == value else 0
+        row[f"cache_{value}"] = 1 if normalized["cache_enabled"] == value else 0
+        row[f"cdn_{value}"] = 1 if normalized["cdn_enabled"] == value else 0
 
+    # One-hot encoding wp_type
     for wp_type in WP_TYPES:
-        row[f"wp_type_{wp_type}"] = 1 if normalized["wp_type"] == wp_type else 0
+        row[f"wp_{wp_type}"] = 1 if normalized["wp_type"] == wp_type else 0
 
+    row["peak_duration_minutes"] = max(0, row["peak_hours_end_minutes"] - row["peak_hours_start_minutes"])
+
+    # Créer le DataFrame avec toutes les colonnes attendues
     features = pd.DataFrame([{column: row.get(column, 0) for column in feature_columns}])
+    features = features.astype(float)
+    
+    # Debug
+    print(f"Nombre de features avec valeurs non-nulles: {(features.iloc[0] != 0).sum()}", file=sys.stderr)
+    print(f"Features non-nulles: {[col for col in features.columns if features[col].iloc[0] != 0]}", file=sys.stderr)
+    
     return features, normalized
 
 
@@ -255,24 +280,58 @@ def days_to_months_days(days: float | None) -> tuple[int, int, str]:
 
 def build_recommendation(predicted_load: float, saturation_days: float, saturation_text: str) -> tuple[str, str]:
     if predicted_load >= 85 or saturation_days <= 30:
-        return "CRITIQUE", "Migration immédiate requise - Serveur en surcharge critique"
+        return "🔴 CRITIQUE", "Migration immédiate requise - Serveur en surcharge critique "
 
     if predicted_load >= 75 or saturation_days <= 60:
-        return "URGENT", f"Planifier une migration urgente - Risque de saturation dans {saturation_text}"
+        return "🟠 URGENT", f"Planifier une migration urgente - Risque de saturation dans {saturation_text} ; Certains paramètres dépassent les limites du plan choisi"
 
     if predicted_load >= 65 or saturation_days <= 180:
-        return "SURVEILLANCE", f"Surveiller et optimiser - Marge de {saturation_text} avant saturation"
+        return "🟡 SURVEILLANCE", f"Surveiller et optimiser - Marge de {saturation_text} avant saturation ; Certains paramètres approchent des limites du plan choisi"
 
-    return "OPTIMAL", "Configuration stable - Aucune action requise"
+    return "🟢 OPTIMAL", "Configuration stable - Aucune action requise ; Tous les paramètres loin des limites du plan choisi"
 
 
 def predict(model: Any, feature_columns: list[str], params: dict[str, Any], metadata: dict[str, Any] = None) -> dict[str, Any]:
     features, normalized = prepare_features(params, feature_columns)
+    
+    # Debug
+    print("Features envoyées au modèle :", features.to_dict(orient="records"), file=sys.stderr)
 
-    predicted_load = float(model.predict(features)[0])
-    predicted_load = round(min(100.0, max(0.0, predicted_load)), 2)
+    # Vérifier si c'est un classifieur
+    is_classifier = hasattr(model, 'predict_proba')
+    
+    if is_classifier:
+        # CLASSIFIEUR : Convertir la classe prédite en score de charge
+        predicted_class = int(model.predict(features)[0])
+        probabilities = model.predict_proba(features)[0]
+        
+        # Récupérer les noms des plans depuis les métadonnées ou utiliser les labels par défaut
+        plan_labels = metadata.get("plan_labels", PLAN_LABELS) if metadata else PLAN_LABELS
+        predicted_plan = plan_labels[predicted_class] if predicted_class < len(plan_labels) else "unknown"
+        
+        # Convertir le plan en score de charge estimé
+        # On utilise une interpolation basée sur les probabilités pour plus de précision
+        if len(probabilities) == 3:
+            # Score pondéré par les probabilités
+            load_scores = [PLAN_TO_LOAD_SCORE[plan] for plan in plan_labels]
+            predicted_load = sum(prob * score for prob, score in zip(probabilities, load_scores))
+        else:
+            # Fallback : utiliser le score du plan prédit
+            predicted_load = PLAN_TO_LOAD_SCORE.get(predicted_plan, 50.0)
+        
+        predicted_load = round(min(100.0, max(0.0, predicted_load)), 2)
+        
+        print(f"Classe prédite: {predicted_class} -> Plan: {predicted_plan}", file=sys.stderr)
+        print(f"Probabilités: {dict(zip(plan_labels, probabilities))}", file=sys.stderr)
+        print(f"Score de charge estimé: {predicted_load}", file=sys.stderr)
+    else:
+        # RÉGRESSEUR : utiliser directement la prédiction
+        predicted_load = float(model.predict(features)[0])
+        predicted_load = round(min(100.0, max(0.0, predicted_load)), 2)
+        print(f"Predicted load brut: {predicted_load}", file=sys.stderr)
 
-    growth = max(0.0, float(normalized["traffic_growth_rate"]))
+    # Calcul de la saturation (même logique qu'avant)
+    growth = max(0.0, float(normalized["traffic_growth_rate"] or 0.0))
 
     if predicted_load >= 90:
         saturation_months_raw = 0.0
@@ -289,32 +348,16 @@ def predict(model: Any, feature_columns: list[str], params: dict[str, Any], meta
     saturation_months, saturation_jours, saturation_text = days_to_months_days(saturation_days)
     status, recommendation = build_recommendation(predicted_load, saturation_days, saturation_text)
 
-    capacity_margin = round(max(0.0, 100.0 - predicted_load), 2)
+    # Calcul du taux d'erreurs applicatives estimé
+    plugin_count = float(normalized.get("plugin_count", 0) or 0)
+    ram_usage_max = float(normalized.get("ram_usage_max", 0) or 0)
+    response_time = float(normalized.get("response_time", 0) or 0)
+    error_rate = min(100, (plugin_count * 2) + (ram_usage_max / 2) + (response_time / 100))
+    error_rate = round(error_rate, 2)
 
-    # Récupérer le vrai score R² du modèle depuis le model.pkl si disponible
-    r2_score_model = None
-    if metadata and isinstance(metadata, dict) and 'performance_metrics' in metadata:
-        r2_score_model = metadata['performance_metrics'].get('r2', None)
-    if (
-        r2_score_model is None
-        or r2_score_model == ''
-        or r2_score_model == 'null'
-        or (isinstance(r2_score_model, float) and (np.isnan(r2_score_model) or np.isinf(r2_score_model)))
-    ):
-        r2_score_model = "N/A"
-    else:
-        try:
-            if isinstance(r2_score_model, (float, int)):
-                r2_score_model = round(float(r2_score_model), 4)
-            else:
-                r2_score_model = str(r2_score_model)
-        except Exception:
-            r2_score_model = str(r2_score_model)
     return {
         "predicted_load": predicted_load,
-        "xgboost_score": r2_score_model,
-        "recommended_capacity_score": predicted_load,
-        "capacity_margin": capacity_margin,
+        "error_rate": error_rate,
         "saturation_days": round(float(saturation_days), 2),
         "saturation_months": saturation_months,
         "saturation_jours": saturation_jours,
@@ -336,7 +379,6 @@ def predict_from_json() -> dict[str, Any]:
             "output": {
                 "result": {
                     "predicted_load": None,
-                    "xgboost_score": None,
                     "saturation_text": "Modèle introuvable",
                     "status": "ERREUR",
                     "recommendation": "Le modèle XGBoost n'a pas pu être chargé.",
@@ -351,7 +393,6 @@ def predict_from_json() -> dict[str, Any]:
             "output": {
                 "result": {
                     "predicted_load": None,
-                    "xgboost_score": None,
                     "saturation_text": "Colonnes introuvables",
                     "status": "ERREUR",
                     "recommendation": "Réentraîne le modèle pour sauvegarder feature_columns dans model.pkl.",
@@ -368,7 +409,6 @@ def predict_from_json() -> dict[str, Any]:
             "output": {
                 "result": {
                     "predicted_load": None,
-                    "xgboost_score": None,
                     "saturation_text": "Aucun paramètre trouvé",
                     "status": "ERREUR",
                     "recommendation": "Ajoute un fichier JSON dans /app/Donnee_parametres avant la prédiction.",

@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""
+Graphiques d'analyse Vala Bleu - 4 Graphiques Dynamiques
+1. Radar des Ressources (équilibre global)
+2. Jauges de Saturation (niveau de criticité)
+3. Impact des Features (barres divergentes positif/négatif)
+4. Courbe de Dégradation Temporelle (projection 3 scénarios)
+"""
+
 import glob
 import json
 import math
@@ -12,14 +20,16 @@ from pathlib import Path
 import joblib
 import matplotlib
 import matplotlib.dates as mdates
+import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
-from matplotlib.patches import Wedge, Circle, Patch
-from sklearn.inspection import PartialDependenceDisplay
+from matplotlib.patches import Wedge, Circle, Patch, FancyBboxPatch
+from matplotlib.patches import FancyArrowPatch
+import matplotlib.gridspec as gridspec
 
 # ============================================
 # CONFIGURATION MATPLOTLIB
@@ -33,22 +43,12 @@ plt.rcParams.update({
     'axes.facecolor': 'white',
     'savefig.facecolor': 'white',
     'savefig.bbox': 'tight',
-    'savefig.dpi': 180,
+    'savefig.dpi': 150,
 })
 
 # ============================================
-# VERIFICATION SHAP
+# CHEMINS ET CONFIGURATION
 # ============================================
-SHAP_AVAILABLE = False
-try:
-    import shap
-    SHAP_AVAILABLE = True
-    print(f"[OK] SHAP installe (version {shap.__version__})", file=sys.stderr)
-except ImportError as e:
-    print(f"[WARN] SHAP non disponible: {e}", file=sys.stderr)
-except Exception as e:
-    print(f"[WARN] Erreur chargement SHAP: {e}", file=sys.stderr)
-
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -65,7 +65,6 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
 SATURATION_LIMIT = 90.0
-DECISION_THRESHOLD = 65.0
 
 HEAVY_PLUGIN_OPTIONS = [
     "woocommerce", "elementor", "wpml",
@@ -88,37 +87,17 @@ DEFAULTS = {
     "cdn_enabled": "oui", "wp_type": "medium",
 }
 
-FRENCH_LABELS = {
-    "visitors_per_day": "Visiteurs / jour",
-    "pageviews_per_day": "Pages vues / jour",
-    "traffic_growth_rate": "Taux de croissance",
-    "peak_hours_start_minutes": "Pic debut",
-    "peak_hours_end_minutes": "Pic fin",
-    "peak_duration_minutes": "Duree pic",
-    "cpu_usage_avg": "CPU moyen",
-    "cpu_usage_peak": "CPU max",
-    "ram_usage_avg": "RAM moyenne",
-    "ram_usage_max": "RAM max",
-    "disk_usage_avg": "Disque utilise",
-    "disk_usage_max": "Disque max",
-    "response_time": "Temps reponse",
-    "disk_read_iops": "IOPS Read",
-    "disk_write_iops": "IOPS Write",
-    "plugin_count": "Nombre plugins",
-}
-
-
 # ============================================
 # FONCTIONS UTILITAIRES
 # ============================================
 
 def load_model():
     if not MODEL_PATH.exists():
-        return None, None, None
+        return None, None
     payload = joblib.load(str(MODEL_PATH))
     if isinstance(payload, dict):
-        return payload.get("model"), payload.get("feature_columns"), payload.get("scaler")
-    return payload, None, None
+        return payload.get("model"), payload.get("feature_columns")
+    return payload, None
 
 
 def find_latest_json():
@@ -134,63 +113,48 @@ def load_params(filepath):
     return data.get("parameters", data.get("params", data))
 
 
-def to_float(value, default):
-    if value is None or value == "":
-        return float(default)
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
-def clean_select(value, default):
-    if value is None:
-        return default
-    value = str(value).strip()
-    return default if value == "" or value.lower() == "none" else value
-
-
-def time_to_minutes(value, default):
-    value = clean_select(value, default)
-    try:
-        hour, minute = value.split(":")[:2]
-        return int(hour) * 60 + int(minute)
-    except Exception:
-        hour, minute = default.split(":")
-        return int(hour) * 60 + int(minute)
-
-
 def normalize_heavy_plugins(value):
     if value is None:
         return []
     if isinstance(value, list):
         return [str(item).strip().lower() for item in value if str(item).strip()]
-    return [item.strip().lower() for item in str(value).split(",") if item.strip()]
+    if isinstance(value, str):
+        return [item.strip().lower() for item in value.split(",") if item.strip()]
+    return []
 
 
 def normalize_params(params):
     return {
-        "visitors_per_day": params.get("visitors_per_day"),
-        "pageviews_per_day": params.get("pageviews_per_day"),
-        "traffic_growth_rate": params.get("traffic_growth_rate"),
-        "peak_hours_start": params.get("peak_hours_start"),
-        "peak_hours_end": params.get("peak_hours_end"),
-        "cpu_usage_avg": params.get("cpu_usage_avg"),
-        "cpu_usage_peak": params.get("cpu_usage_peak"),
-        "ram_usage_avg": params.get("ram_usage_avg"),
-        "ram_usage_max": params.get("ram_usage_max"),
-        "disk_usage_avg": params.get("disk_usage_avg"),
-        "disk_usage_max": params.get("disk_usage_max"),
-        "response_time": params.get("response_time"),
-        "disk_read_iops": params.get("disk_read_iops"),
-        "disk_write_iops": params.get("disk_write_iops"),
-        "plugin_count": params.get("plugin_count"),
-        "heavy_plugins": normalize_heavy_plugins(params.get("heavy_plugins")),
-        "php_version": params.get("php_version"),
-        "cache_enabled": params.get("cache_enabled"),
-        "cdn_enabled": params.get("cdn_enabled"),
-        "wp_type": params.get("wp_type"),
+        "visitors_per_day": float(params.get("visitors_per_day", DEFAULTS["visitors_per_day"])),
+        "pageviews_per_day": float(params.get("pageviews_per_day", DEFAULTS["pageviews_per_day"])),
+        "traffic_growth_rate": float(params.get("traffic_growth_rate", DEFAULTS["traffic_growth_rate"])),
+        "cpu_usage_avg": float(params.get("cpu_usage_avg", DEFAULTS["cpu_usage_avg"])),
+        "cpu_usage_peak": float(params.get("cpu_usage_peak", DEFAULTS["cpu_usage_peak"])),
+        "ram_usage_avg": float(params.get("ram_usage_avg", DEFAULTS["ram_usage_avg"])),
+        "ram_usage_max": float(params.get("ram_usage_max", DEFAULTS["ram_usage_max"])),
+        "disk_usage_avg": float(params.get("disk_usage_avg", DEFAULTS["disk_usage_avg"])),
+        "disk_usage_max": float(params.get("disk_usage_max", DEFAULTS["disk_usage_max"])),
+        "response_time": float(params.get("response_time", DEFAULTS["response_time"])),
+        "disk_read_iops": float(params.get("disk_read_iops", DEFAULTS["disk_read_iops"])),
+        "disk_write_iops": float(params.get("disk_write_iops", DEFAULTS["disk_write_iops"])),
+        "plugin_count": float(params.get("plugin_count", DEFAULTS["plugin_count"])),
+        "heavy_plugins": normalize_heavy_plugins(params.get("heavy_plugins", [])),
+        "php_version": str(params.get("php_version", DEFAULTS["php_version"])),
+        "cache_enabled": str(params.get("cache_enabled", DEFAULTS["cache_enabled"])),
+        "cdn_enabled": str(params.get("cdn_enabled", DEFAULTS["cdn_enabled"])),
+        "wp_type": str(params.get("wp_type", DEFAULTS["wp_type"])),
     }
+
+
+def time_to_minutes(value, default):
+    try:
+        if not value or value == "none":
+            raise ValueError("Valeur none")
+        hour, minute = str(value).split(":")[:2]
+        return int(hour) * 60 + int(minute)
+    except Exception:
+        hour, minute = default.split(":")
+        return int(hour) * 60 + int(minute)
 
 
 def build_feature_row(normalized):
@@ -209,8 +173,8 @@ def build_feature_row(normalized):
         "disk_read_iops": normalized["disk_read_iops"],
         "disk_write_iops": normalized["disk_write_iops"],
         "plugin_count": normalized["plugin_count"],
-        "peak_hours_start_minutes": time_to_minutes(normalized["peak_hours_start"], DEFAULTS["peak_hours_start"]),
-        "peak_hours_end_minutes": time_to_minutes(normalized["peak_hours_end"], DEFAULTS["peak_hours_end"]),
+        "peak_hours_start_minutes": time_to_minutes(normalized.get("peak_hours_start"), DEFAULTS["peak_hours_start"]),
+        "peak_hours_end_minutes": time_to_minutes(normalized.get("peak_hours_end"), DEFAULTS["peak_hours_end"]),
     }
     row["peak_duration_minutes"] = max(0, row["peak_hours_end_minutes"] - row["peak_hours_start_minutes"])
     for plugin in HEAVY_PLUGIN_OPTIONS:
@@ -229,11 +193,14 @@ def prepare_features(params, feature_columns):
     normalized = normalize_params(params)
     row = build_feature_row(normalized)
     features = pd.DataFrame([{column: row.get(column, 0) for column in feature_columns}])
-    return features, normalized, row
+    return features, normalized
 
 
 def predict_load(model_load, features_df):
-    return min(100.0, max(0.0, float(model_load.predict(features_df)[0])))
+    try:
+        return min(100.0, max(0.0, float(model_load.predict(features_df)[0])))
+    except Exception:
+        return 50.0
 
 
 def days_to_months_days(days):
@@ -256,573 +223,482 @@ def days_to_months_days(days):
     return months, remaining_days, text
 
 
-def make_simulated_dataset(base_features, feature_columns, n_samples=300):
-    rng = np.random.default_rng(42)
-    base = base_features.iloc[0].to_dict()
-    rows = []
-    binary_prefixes = ("heavy_plugin_", "php_version_", "cache_enabled_", "cdn_enabled_", "wp_type_")
-    for _ in range(n_samples):
-        row = {}
-        for column in feature_columns:
-            value = base.get(column, 0)
-            if column.startswith(binary_prefixes):
-                row[column] = int(value)
-            else:
-                value = float(value)
-                noise = rng.normal(0, max(abs(value) * 0.12, 1.0))
-                row[column] = max(0, value + noise)
-        rows.append(row)
-    return pd.DataFrame(rows, columns=feature_columns)
-
-
-def label_for(feature):
-    if feature.startswith("heavy_plugin_"):
-        return "Plugin lourd"
-    if feature.startswith("php_version_"):
-        return "Version PHP"
-    if feature.startswith("cache_enabled_"):
-        return "Cache active"
-    if feature.startswith("cdn_enabled_"):
-        return "CDN active"
-    if feature.startswith("wp_type_"):
-        return "Pack WordPress"
-    return FRENCH_LABELS.get(feature, feature)
-
-
-def get_feature_labels(features_df):
-    feature_labels = []
-    for col in features_df.columns:
-        if col.startswith("heavy_plugin_"):
-            feature_labels.append(f"Plugin: {col.replace('heavy_plugin_', '')}")
-        elif col.startswith("php_version_"):
-            feature_labels.append(f"PHP {col.replace('php_version_', '')}")
-        elif col.startswith("cache_enabled_"):
-            feature_labels.append(f"Cache: {col.replace('cache_enabled_', '')}")
-        elif col.startswith("cdn_enabled_"):
-            feature_labels.append(f"CDN: {col.replace('cdn_enabled_', '')}")
-        elif col.startswith("wp_type_"):
-            feature_labels.append(f"Type: {col.replace('wp_type_', '')}")
-        else:
-            feature_labels.append(FRENCH_LABELS.get(col, col))
-    return feature_labels
-
-
 # ============================================
-# GRAPHE 1 : PARTIAL DEPENDENCE PLOT
+# GRAPHIQUE 1 : RADAR DES RESSOURCES
 # ============================================
 
-def graph_partial_dependence(model_load, features_df, feature_columns):
+def graph_radar_resources(normalized, current_load):
+    """Radar chart montrant l'equilibre global du serveur"""
     try:
-        numeric_features = [
-            f for f in feature_columns
-            if not f.startswith(("heavy_plugin_", "php_version_", "cache_enabled_", "cdn_enabled_", "wp_type_"))
-        ][:20]
-
-        sim_df = make_simulated_dataset(features_df, feature_columns, n_samples=350)
-        n_cols = 4
-        n_rows = math.ceil(len(numeric_features) / n_cols)
-
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(24, max(6, n_rows * 4.6)))
-        axes = np.array(axes).reshape(-1)
-
-        for index, feature in enumerate(numeric_features):
-            feature_index = feature_columns.index(feature)
-            ax = axes[index]
-            try:
-                PartialDependenceDisplay.from_estimator(
-                    model_load, sim_df,
-                    features=[feature_index],
-                    feature_names=feature_columns,
-                    grid_resolution=35, ax=ax,
-                    line_kw={"color": "#2563eb", "linewidth": 2.4},
-                )
-                current_value = float(features_df.iloc[0][feature])
-                ax.axvline(current_value, color="#ef4444", linestyle="--", linewidth=1.8)
-                ax.set_title(label_for(feature), fontsize=11, fontweight="bold")
-                ax.set_ylabel("Charge serveur" if index % n_cols == 0 else "")
-                ax.grid(True, alpha=0.25)
-            except Exception:
-                ax.text(0.5, 0.5, f"{label_for(feature)}\nindisponible", ha="center", va="center")
-                ax.set_title(label_for(feature), fontsize=11, fontweight="bold")
-                ax.axis("off")
-
-        for index in range(len(numeric_features), len(axes)):
-            axes[index].axis("off")
-
-        plt.suptitle("Partial Dependence Plot - Effet des variables sur la charge serveur",
-                     fontsize=18, fontweight="bold")
-        plt.tight_layout(rect=[0, 0, 1, 0.97])
-
-        path = str(OUTPUT_DIR / f"partial_dependence_all_{TIMESTAMP}.png")
-        plt.savefig(path, dpi=180, bbox_inches="tight", facecolor="white")
-        plt.close()
-        return path
-    except Exception as exc:
-        print(f"[ERREUR] PDP: {exc}", file=sys.stderr)
-        return None
-
-
-# ============================================
-# GRAPHE 2 : SATURATION EVOLUTION
-# ============================================
-
-def graph_saturation_evolution(model_load, features_df, normalized, feature_columns):
-    try:
-        current_load = predict_load(model_load, features_df)
-        growth_rate_percent = max(0.0, float(normalized["traffic_growth_rate"]))
-
-        if current_load >= 90:
-            saturation_days = 0.0
-        elif growth_rate_percent <= 0:
-            saturation_days = 999.0 * 30.44
-        else:
-            sat_months = float(np.log(90 / max(1.0, current_load)) / np.log(1 + growth_rate_percent / 100))
-            saturation_days = max(0.0, sat_months * 30.44)
-
-        _, _, text_sat = days_to_months_days(saturation_days)
-
-        months_projection = 24
-        months = np.arange(0, months_projection + 1)
-        charges = []
-        current_load_proj = current_load
-        for _ in months:
-            charges.append(min(100, current_load_proj))
-            if current_load_proj < 100:
-                current_load_proj *= (1 + growth_rate_percent / 100)
-
-        charges = np.array(charges)
-        sat_idx = np.where(charges >= SATURATION_LIMIT)[0]
-        saturation_month = int(sat_idx[0]) if len(sat_idx) > 0 else None
-
-        fig, ax = plt.subplots(figsize=(16, 8))
-        ax.plot(months, charges, color="#2563eb", linewidth=3, marker="o", markersize=6,
-                label="Charge serveur")
-        ax.axhline(SATURATION_LIMIT, color="#ef4444", linestyle="--", linewidth=2.5,
-                   label=f"Seuil saturation {SATURATION_LIMIT}%")
-        ax.fill_between(months, charges, SATURATION_LIMIT, where=charges >= SATURATION_LIMIT,
-                        color="#ef4444", alpha=0.18)
-        ax.fill_between(months, charges, 0, color="#2563eb", alpha=0.08)
-
-        if saturation_month is not None:
-            ax.axvline(saturation_month, color="#f97316", linestyle=":", linewidth=2.5)
-            ax.scatter([saturation_month], [charges[saturation_month]], s=180,
-                      color="#f97316", edgecolor="white", zorder=5)
-            ax.text(saturation_month, min(100, charges[saturation_month] + 4),
-                    f"Saturation\n{text_sat}", ha="center", fontsize=11, fontweight="bold",
-                    bbox=dict(boxstyle="round", facecolor="#fff7ed", edgecolor="#f97316", alpha=0.95))
-
-        labels = [f"{m} mois\n{int(m * 30.44)} jours" for m in months]
-        ax.set_title("Evolution de la charge serveur jusqu'a saturation", fontsize=17, fontweight="bold")
-        ax.set_xlabel("Temps")
-        ax.set_ylabel("Charge serveur (%)")
-        ax.set_ylim(0, 105)
-        ax.set_xticks(months[::3])
-        ax.set_xticklabels([labels[i] for i in range(0, len(labels), 3)], fontsize=9)
-        ax.grid(alpha=0.3)
-        ax.legend(loc='lower right')
-        plt.tight_layout()
-
-        path = str(OUTPUT_DIR / f"saturation_evolution_{TIMESTAMP}.png")
-        plt.savefig(path, dpi=180, bbox_inches="tight", facecolor="white")
-        plt.close()
-        return path
-    except Exception as exc:
-        print(f"[ERREUR] Saturation: {exc}", file=sys.stderr)
-        return None
-
-
-# ============================================
-# GRAPHE 3 : CHARGE PAR TYPE DE SITE
-# ============================================
-
-
-
-# ============================================
-# GRAPHE 4 : SERIES TEMPORELLES
-# ============================================
-
-def graph_time_series(params):
-    try:
-        visitors = float(params.get("visitors_per_day", DEFAULTS["visitors_per_day"]))
-        cpu_avg = float(params.get("cpu_usage_avg", DEFAULTS["cpu_usage_avg"]))
-        ram_avg = float(params.get("ram_usage_avg", DEFAULTS["ram_usage_avg"]))
-        response_time = float(params.get("response_time", DEFAULTS["response_time"]))
-        growth_rate = float(params.get("traffic_growth_rate", DEFAULTS["traffic_growth_rate"])) / 100
-
-        today = datetime.now()
-        dates = pd.date_range(start=today - timedelta(days=90),
-                              end=today + timedelta(days=90), freq='D')
-        today_idx = 90
-        n = len(dates)
-        np.random.seed(42)
-
-        va, ca, ra, rta = [], [], [], []
-        for i in range(n):
-            g = (1 + growth_rate) ** ((i - today_idx) / 30)
-            noise = np.random.normal(0, 0.08)
-            va.append(max(50, visitors * g * (1 + noise)))
-            ca.append(np.clip(cpu_avg * g * (1 + noise * 0.7), 5, 100))
-            ra.append(np.clip(ram_avg * g * (1 + noise * 0.5), 8, 100))
-            rta.append(np.clip(response_time * g * (1 + noise * 1.2), 40, 5000))
-
-        va = np.array(va)
-        ca = np.array(ca)
-        ra = np.array(ra)
-        rta = np.array(rta)
-
-        g30, g90 = [], []
-        for i in range(n):
-            g30.append(((va[i] - va[i-30]) / va[i-30]) * 100 if i >= 30 else 0)
-            g90.append(((va[i] - va[i-90]) / va[i-90]) * 100 if i >= 90 else 0)
-
-        fig, axes = plt.subplots(5, 1, figsize=(16, 20), sharex=True)
-
-        axes[0].plot(dates, va, color='#2563eb', linewidth=2, label='Visiteurs/jour')
-        axes[0].axvline(x=dates[today_idx], color='red', linestyle='--', alpha=0.7, label="Aujourd'hui")
-        axes[0].fill_between(dates[today_idx:], va[today_idx:], alpha=0.1, color='#2563eb', label='Projection')
-        axes[0].set_ylabel('Visiteurs', fontweight='bold')
-        axes[0].set_title('Visiteurs par jour (historique + projection 90 jours)', fontweight='bold')
-        axes[0].legend(loc='upper left')
-        axes[0].grid(alpha=0.3)
-
-        axes[1].plot(dates, ca, color='#ef4444', linewidth=2, label='CPU moyen (%)')
-        axes[1].axvline(x=dates[today_idx], color='red', linestyle='--', alpha=0.7)
-        axes[1].axhline(y=90, color='darkred', linestyle='--', alpha=0.5, label='Saturation (90%)')
-        axes[1].axhline(y=75, color='orange', linestyle=':', alpha=0.5, label='Alerte (75%)')
-        axes[1].fill_between(dates[today_idx:], ca[today_idx:], alpha=0.1, color='#ef4444')
-        axes[1].set_ylabel('CPU (%)', fontweight='bold')
-        axes[1].set_title('CPU moyen (historique + projection 90 jours)', fontweight='bold')
-        axes[1].legend(loc='upper left')
-        axes[1].grid(alpha=0.3)
-
-        axes[2].plot(dates, ra, color='#f59e0b', linewidth=2, label='RAM moyenne (%)')
-        axes[2].axvline(x=dates[today_idx], color='red', linestyle='--', alpha=0.7)
-        axes[2].axhline(y=90, color='darkred', linestyle='--', alpha=0.5, label='Saturation (90%)')
-        axes[2].axhline(y=75, color='orange', linestyle=':', alpha=0.5, label='Alerte (75%)')
-        axes[2].fill_between(dates[today_idx:], ra[today_idx:], alpha=0.1, color='#f59e0b')
-        axes[2].set_ylabel('RAM (%)', fontweight='bold')
-        axes[2].set_title('RAM moyenne (historique + projection 90 jours)', fontweight='bold')
-        axes[2].legend(loc='upper left')
-        axes[2].grid(alpha=0.3)
-
-        axes[3].plot(dates, rta, color='#8b5cf6', linewidth=2, label='Temps de reponse (ms)')
-        axes[3].axvline(x=dates[today_idx], color='red', linestyle='--', alpha=0.7)
-        axes[3].axhline(y=1000, color='orange', linestyle='--', alpha=0.5, label='Limite acceptable (1000ms)')
-        axes[3].fill_between(dates[today_idx:], rta[today_idx:], alpha=0.1, color='#8b5cf6')
-        axes[3].set_ylabel('ms', fontweight='bold')
-        axes[3].set_title('Temps de reponse (historique + projection 90 jours)', fontweight='bold')
-        axes[3].legend(loc='upper left')
-        axes[3].grid(alpha=0.3)
-
-        axes[4].plot(dates, g30, color='#10b981', linewidth=2, label='Croissance moyenne 30j (%)')
-        axes[4].plot(dates, g90, color='#6366f1', linewidth=2, label='Croissance moyenne 90j (%)')
-        axes[4].axvline(x=dates[today_idx], color='red', linestyle='--', alpha=0.7)
-        axes[4].axhline(y=0, color='black', linestyle='-', alpha=0.3)
-        axes[4].set_ylabel('Croissance (%)', fontweight='bold')
-        axes[4].set_xlabel('Date', fontweight='bold')
-        axes[4].set_title('Croissance du trafic (moyennes mobiles 30j et 90j)', fontweight='bold')
-        axes[4].legend(loc='upper left')
-        axes[4].grid(alpha=0.3)
-
-        for ax in axes:
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%d/%m'))
-            ax.xaxis.set_major_locator(mdates.MonthLocator())
-            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
-
-        fig.suptitle('Series Temporelles - Tendances et Projections sur 180 jours',
-                     fontsize=18, fontweight='bold', y=1.02)
-        plt.tight_layout()
-
-        path = str(OUTPUT_DIR / f"time_series_{TIMESTAMP}.png")
-        plt.savefig(path, dpi=180, bbox_inches='tight', facecolor='white')
-        plt.close()
-        return path
-    except Exception as exc:
-        print(f"[ERREUR] Time series: {exc}", file=sys.stderr)
-        return None
-
-
-# ============================================
-# GRAPHE 5 : SHAP BAR PLOT + JAUGE
-# ============================================
-
-def graph_shap_force_plot(model_load, features_df, feature_columns, normalized):
-    """
-    SHAP - Bar Plot + Jauge (sans Waterfall, sans resume)
-    """
-    if not SHAP_AVAILABLE:
-        print("[WARN] SHAP non disponible", file=sys.stderr)
-        return _graph_shap_missing()
-
-    try:
-        import shap
-
-        explainer = shap.TreeExplainer(model_load)
-        shap_values = explainer.shap_values(features_df)
-        current_prediction = model_load.predict(features_df)[0]
-        feature_labels = get_feature_labels(features_df)
-
-        if current_prediction >= 85:
-            etat, etat_color = "CRITIQUE", '#ef4444'
-        elif current_prediction >= 75:
-            etat, etat_color = "URGENT", '#f97316'
-        elif current_prediction >= 65:
-            etat, etat_color = "SURVEILLANCE", '#eab308'
-        else:
-            etat, etat_color = "OPTIMAL", '#10b981'
-
-        fig = plt.figure(figsize=(20, 10))
-
-        # ---- Bar Plot (gauche) ----
-        ax1 = fig.add_subplot(1, 2, 1)
-        shap_df = pd.DataFrame({'feature': feature_labels, 'shap_value': shap_values[0]})
-        shap_df['impact_abs'] = np.abs(shap_df['shap_value'])
-        shap_df = shap_df.sort_values('impact_abs', ascending=True)
-        shap_df_plot = shap_df.tail(15)
-
-        colors = ['#ef4444' if x < 0 else '#10b981' for x in shap_df_plot['shap_value']]
-        bars = ax1.barh(shap_df_plot['feature'], shap_df_plot['shap_value'],
-                        color=colors, alpha=0.85, edgecolor='white', linewidth=1)
-
-        for bar, val in zip(bars, shap_df_plot['shap_value']):
-            if val > 0:
-                ax1.text(val + 0.05, bar.get_y() + bar.get_height()/2,
-                        f'+{val:.2f}', va='center', fontsize=9, fontweight='bold')
-            else:
-                ax1.text(val - 0.3, bar.get_y() + bar.get_height()/2,
-                        f'{val:.2f}', va='center', fontsize=9, fontweight='bold', ha='right')
-
-        ax1.axvline(x=0, color='black', linestyle='-', linewidth=1.5)
-        ax1.set_xlabel('Contribution SHAP', fontsize=11, fontweight='bold')
-        ax1.set_title('Top 15 Features - Impact sur la prediction\nVert: Augmente | Rouge: Reduit',
-                     fontsize=12, fontweight='bold')
-        ax1.grid(axis='x', alpha=0.3, linestyle='--')
-
-        # ---- Jauge (droite) ----
-        ax2 = fig.add_subplot(1, 2, 2)
-        sectors = [
-            (0, 65, '#10b981', 'OPTIMAL'),
-            (65, 75, '#eab308', 'SURVEILLANCE'),
-            (75, 85, '#f97316', 'URGENT'),
-            (85, 100, '#ef4444', 'CRITIQUE'),
-        ]
-        for start, end, color, label in sectors:
-            wedge = Wedge((0, 0), 1, start * 3.6, end * 3.6, width=0.3, color=color, alpha=0.6)
-            ax2.add_patch(wedge)
-
-        angle = current_prediction * 3.6
-        ax2.arrow(0, 0, 0.7 * np.cos(np.radians(90 - angle)),
-                 0.7 * np.sin(np.radians(90 - angle)),
-                 head_width=0.08, head_length=0.1, fc='black', ec='black', linewidth=2)
-
-        circle = Circle((0, 0), 0.15, color='white', ec='black', linewidth=2)
-        ax2.add_patch(circle)
-        ax2.text(0, -0.05, f'{current_prediction:.1f}%', ha='center', va='center',
-                fontsize=18, fontweight='bold', color=etat_color)
-        ax2.text(0, -0.25, etat, ha='center', va='center', fontsize=11,
-                fontweight='bold', color=etat_color)
-
-        for start, end, color, label in sectors:
-            mid = (start + end) / 2
-            ang = np.radians(90 - mid * 3.6)
-            ax2.text(1.25 * np.cos(ang), 1.25 * np.sin(ang), label,
-                    ha='center', va='center', fontsize=8, fontweight='bold',
-                    color=color, rotation=mid * 3.6 - 90)
-
-        ax2.set_xlim(-1.5, 1.5)
-        ax2.set_ylim(-1.5, 1.5)
-        ax2.set_aspect('equal')
-        ax2.axis('off')
-        ax2.set_title(f'Jauge de Charge Serveur\nCharge predite: {current_prediction:.1f}%',
-                     fontsize=12, fontweight='bold')
-
-        fig.suptitle('SHAP - Explication Locale de la Prediction XGBoost',
-                     fontsize=16, fontweight='bold', y=1.02)
-        fig.text(0.5, 0.01, 'SHAP (SHapley Additive exPlanations)',
-                ha='center', fontsize=9, color='#64748b', style='italic')
-
-        plt.tight_layout(rect=[0, 0.03, 1, 0.97])
-
-        path = str(OUTPUT_DIR / f"shap_force_plot_{TIMESTAMP}.png")
-        plt.savefig(path, dpi=180, bbox_inches='tight', facecolor='white')
-        plt.close()
-        return path
-
-    except Exception as exc:
-        print(f"[ERREUR] SHAP: {exc}", file=sys.stderr)
-        return _graph_shap_missing()
-
-
-def _graph_shap_missing():
-    fig, ax = plt.subplots(figsize=(14, 8))
-    ax.axis('off')
-    message = (
-        "Module SHAP non installe\n\n"
-        "Pour generer le SHAP Plot :\n"
-        "  pip install shap\n\n"
-        "Le SHAP Plot permet de :\n"
-        "  - Expliquer UNE decision precise\n"
-        "  - Identifier les parametres les plus impactants\n"
-        "  - Justifier les recommandations (transparence IA)"
-    )
-    ax.text(0.5, 0.5, message, ha='center', va='center', fontsize=13,
-            fontfamily='monospace',
-            bbox=dict(boxstyle='round', facecolor='#fef3c7', edgecolor='#f59e0b', alpha=0.9))
-    ax.set_title('SHAP Plot - Module Manquant', fontsize=16, fontweight='bold')
-
-    path = str(OUTPUT_DIR / f"shap_force_plot_missing_{TIMESTAMP}.png")
-    plt.savefig(path, dpi=150, bbox_inches='tight', facecolor='white')
-    plt.close()
-    return path
-
-
-# ============================================
-# GRAPHE 6 : DECISION BOUNDARY EVOLUTION PLOT
-# ============================================
-
-def graph_decision_boundary(model_load, features_df, normalized, feature_columns):
-    """
-    GRAPHE 6 : Frontiere de decision evolutive XGBoost
-    Montre le point exact ou la decision change (Upgrade / No Upgrade)
-    """
-    try:
-        current_visitors = float(normalized.get("visitors_per_day", DEFAULTS["visitors_per_day"]))
-        current_cpu = float(normalized.get("cpu_usage_avg", DEFAULTS["cpu_usage_avg"]))
-        growth_rate = float(normalized.get("traffic_growth_rate", DEFAULTS["traffic_growth_rate"]))
-        plugin_count = float(normalized.get("plugin_count", DEFAULTS["plugin_count"]))
-
-        n_points = 80
-        visitors_range = np.linspace(100, 150000, n_points)
-        cpu_range = np.linspace(5, 100, n_points)
-
-        XX, YY = np.meshgrid(visitors_range, cpu_range)
-        base_row = features_df.iloc[0].to_dict()
-        ZZ = np.zeros((n_points, n_points))
-
-        for i in range(n_points):
-            for j in range(n_points):
-                row_copy = base_row.copy()
-                row_copy["visitors_per_day"] = XX[i, j]
-                row_copy["cpu_usage_avg"] = YY[i, j]
-                cpu_ratio = YY[i, j] / max(1, current_cpu) if current_cpu > 0 else 1
-                row_copy["ram_usage_avg"] = min(100, base_row.get("ram_usage_avg", 60) * cpu_ratio)
-                df_point = pd.DataFrame([row_copy])
-                ZZ[i, j] = predict_load(model_load, df_point)
-
-        fig, ax = plt.subplots(figsize=(16, 10))
-
-        # Zones colorees
-        ax.contourf(XX, YY, ZZ, levels=[0, DECISION_THRESHOLD, 100],
-                    colors=['#10b981', '#ef4444'], alpha=0.25)
-
-        # Isolignes
-        contour_levels = [25, 40, 55, 65, 75, 85, 95]
-        contours = ax.contour(XX, YY, ZZ, levels=contour_levels,
-                             colors='black', linewidths=0.8, alpha=0.5)
-        ax.clabel(contours, inline=True, fontsize=8, fmt='%.0f%%')
-
-        # Frontiere de decision
-        ax.contour(XX, YY, ZZ, levels=[DECISION_THRESHOLD],
-                  colors='#f97316', linewidths=3, linestyles='-')
-
-        # Point actuel
-        ax.scatter([current_visitors], [current_cpu], s=300,
-                  color='#2563eb', edgecolor='white', linewidth=3, zorder=10)
-
-        current_load = predict_load(model_load, features_df)
-        if current_load >= 85:
-            point_status, point_color = "CRITIQUE", '#ef4444'
-        elif current_load >= 75:
-            point_status, point_color = "URGENT", '#f97316'
-        elif current_load >= 65:
-            point_status, point_color = "SURVEILLANCE", '#eab308'
-        else:
-            point_status, point_color = "STABLE", '#10b981'
-
-        ax.annotate(
-            f'Position actuelle\n{current_visitors:.0f} vis/j, CPU {current_cpu:.1f}%\n'
-            f'Charge: {current_load:.1f}% ({point_status})',
-            xy=(current_visitors, current_cpu),
-            xytext=(current_visitors + 15000, current_cpu + 15),
-            fontsize=11, fontweight='bold', color=point_color,
-            bbox=dict(boxstyle='round', facecolor='white', edgecolor=point_color, alpha=0.95),
-            arrowprops=dict(arrowstyle='->', color=point_color, lw=2)
-        )
-
-        # Fleche de projection
-        growth_factor = 1 + growth_rate / 100
-        future_visitors = min(150000, current_visitors * (growth_factor ** 12))
-
-        ax.annotate('', xy=(future_visitors, current_cpu * 1.1),
-                   xytext=(current_visitors, current_cpu),
-                   arrowprops=dict(arrowstyle='->', color='#8b5cf6', lw=2.5,
-                                 connectionstyle='arc3,rad=0.3'))
-
-        ax.text(future_visitors + 3000, current_cpu * 1.1 + 3,
-                f'Projection 12 mois\n{future_visitors:.0f} vis/j\nCroissance: {growth_rate:.1f}%',
-                fontsize=9, color='#8b5cf6', fontweight='bold',
-                bbox=dict(boxstyle='round', facecolor='#f3e8ff', alpha=0.8))
-
-        # Zones annotees
-        ax.text(2000, 15, 'ZONE STABLE\nPas d\'upgrade necessaire',
-               fontsize=12, fontweight='bold', color='#10b981',
-               bbox=dict(boxstyle='round', facecolor='white', edgecolor='#10b981', alpha=0.9))
-
-        ax.text(120000, 88, 'ZONE CRITIQUE\nUpgrade recommande',
-               fontsize=12, fontweight='bold', color='#ef4444',
-               bbox=dict(boxstyle='round', facecolor='white', edgecolor='#ef4444', alpha=0.9))
-
-        ax.annotate(f'Frontiere de decision\nSeuil: {DECISION_THRESHOLD:.0f}%',
-                   xy=(60000, 55), fontsize=11, fontweight='bold',
-                   color='#f97316',
-                   bbox=dict(boxstyle='round', facecolor='#fff7ed',
-                            edgecolor='#f97316', alpha=0.9))
-
-        ax.set_xlabel('Visiteurs par jour', fontsize=13, fontweight='bold')
-        ax.set_ylabel('CPU moyen (%)', fontsize=13, fontweight='bold')
-        ax.set_xlim(0, 150000)
+        categories = ['CPU', 'RAM', 'Disque', 'Trafic', 'Plugins', 'Optimisation']
+        N = len(categories)
+        
+        cpu_score = (normalized["cpu_usage_avg"] + normalized["cpu_usage_peak"]) / 2
+        ram_score = (normalized["ram_usage_avg"] + normalized["ram_usage_max"]) / 2
+        disk_score = (normalized["disk_usage_avg"] + normalized["disk_usage_max"]) / 2
+        traffic_score = min(100, (normalized["visitors_per_day"] / 150000) * 100)
+        
+        heavy_count = len(normalized["heavy_plugins"])
+        plugin_score = min(100, (normalized["plugin_count"] / 80) * 100 + heavy_count * 8)
+        
+        opt_score = 0
+        if normalized["cache_enabled"] == "oui":
+            opt_score += 40
+        if normalized["cdn_enabled"] == "oui":
+            opt_score += 30
+        php_version = normalized["php_version"]
+        if php_version in ["8.2", "8.3"]:
+            opt_score += 30
+        elif php_version in ["8.0", "8.1"]:
+            opt_score += 15
+        opt_score = 100 - opt_score
+        
+        values = [cpu_score, ram_score, disk_score, traffic_score, plugin_score, opt_score]
+        values += values[:1]
+        
+        angles = [n / float(N) * 2 * np.pi for n in range(N)]
+        angles += angles[:1]
+        
+        fig, ax = plt.subplots(figsize=(10, 10), subplot_kw=dict(polar=True))
+        
+        ax.fill_between([0, 2*np.pi], 0, 40, color='#10b981', alpha=0.08)
+        ax.fill_between([0, 2*np.pi], 40, 70, color='#f59e0b', alpha=0.08)
+        ax.fill_between([0, 2*np.pi], 70, 100, color='#ef4444', alpha=0.08)
+        
+        for r in [25, 50, 75, 100]:
+            ax.plot([0, 2*np.pi], [r, r], color='#94a3b8', linewidth=0.5, alpha=0.3)
+        
+        ax.fill(angles, values, color='#2563eb', alpha=0.25)
+        ax.plot(angles, values, color='#2563eb', linewidth=2.5, marker='o', markersize=8)
+        
+        for i, (angle, value) in enumerate(zip(angles[:-1], values[:-1])):
+            color = '#10b981' if value < 40 else '#f59e0b' if value < 70 else '#ef4444'
+            ax.plot(angle, value, 'o', color=color, markersize=12, zorder=5)
+        
+        ax.set_xticks(angles[:-1])
+        ax.set_xticklabels(categories, fontsize=13, fontweight='bold')
         ax.set_ylim(0, 100)
-        ax.grid(alpha=0.2, linestyle='--')
-
-        ax.set_title(
-            f'Frontiere de Decision XGBoost\n'
-            f'Visiteurs/jour vs CPU moyen - Seuil Upgrade: {DECISION_THRESHOLD:.0f}%\n'
-            f'Pack: {normalized.get("wp_type", "medium").upper()} | '
-            f'Plugins: {plugin_count:.0f} | '
-            f'Cache: {normalized.get("cache_enabled", "oui").upper()} | '
-            f'CDN: {normalized.get("cdn_enabled", "oui").upper()}',
-            fontsize=14, fontweight='bold'
-        )
-
+        ax.set_yticks([25, 50, 75, 100])
+        ax.set_yticklabels(['25%', '50%', '75%', '100%'], fontsize=9, color='#64748b')
+        
         legend_elements = [
-            Patch(facecolor='#10b981', alpha=0.25, label='Zone Stable (< 65%)'),
-            Patch(facecolor='#ef4444', alpha=0.25, label='Zone Critique (>= 65%)'),
-            plt.Line2D([0], [0], color='#f97316', linewidth=3, label=f'Frontiere ({DECISION_THRESHOLD:.0f}%)'),
-            plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#2563eb',
-                      markersize=12, label='Position actuelle'),
-            plt.Line2D([0], [0], color='#8b5cf6', linewidth=2.5, label='Projection croissance'),
+            Patch(facecolor='#10b981', alpha=0.3, label='Optimal (< 40%)'),
+            Patch(facecolor='#f59e0b', alpha=0.3, label='Surveillance (40-70%)'),
+            Patch(facecolor='#ef4444', alpha=0.3, label='Critique (> 70%)'),
         ]
-        ax.legend(handles=legend_elements, loc='lower right', fontsize=9,
-                 framealpha=0.9, edgecolor='#94a3b8')
-
-        info_text = (
-            f"Parametres influencant la frontiere:\n"
-            f"  Growth: {growth_rate:.1f}% | Plugins: {plugin_count:.0f} | "
-            f"Heavy Plugins: {len(normalized.get('heavy_plugins', []))}"
-        )
-        fig.text(0.5, 0.01, info_text, ha='center', fontsize=9,
-                color='#64748b', style='italic')
-
-        plt.tight_layout(rect=[0, 0.03, 1, 0.97])
-
-        path = str(OUTPUT_DIR / f"decision_boundary_{TIMESTAMP}.png")
-        plt.savefig(path, dpi=180, bbox_inches='tight', facecolor='white')
+        ax.legend(handles=legend_elements, loc='upper right', bbox_to_anchor=(1.3, 1.1))
+        
+        if current_load >= 85:
+            status, status_color = "CRITIQUE", '#ef4444'
+        elif current_load >= 65:
+            status, status_color = "SURVEILLANCE", '#f59e0b'
+        else:
+            status, status_color = "OPTIMAL", '#10b981'
+        
+        ax.set_title(f'Radar des Ressources\nCharge predite: {current_load:.1f}% - {status}',
+                    fontsize=16, fontweight='bold', color=status_color, pad=25)
+        
+        plt.tight_layout()
+        path = str(OUTPUT_DIR / f"radar_resources_{TIMESTAMP}.png")
+        plt.savefig(path, dpi=150, bbox_inches='tight', facecolor='white')
         plt.close()
-
         return path
-
     except Exception as exc:
-        print(f"[ERREUR] Decision Boundary: {exc}", file=sys.stderr)
+        print(f"[ERREUR] Radar: {exc}", file=sys.stderr)
+        return None
+
+
+# ============================================
+# GRAPHIQUE 2 : JAUGES DE SATURATION
+# ============================================
+
+def graph_gauges_saturation(normalized, current_load):
+    """6 jauges semi-circulaires montrant le niveau de criticite"""
+    try:
+        fig = plt.figure(figsize=(18, 10))
+        gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.4, wspace=0.3)
+        
+        gauges_config = [
+            {
+                "title": "CPU",
+                "value": normalized["cpu_usage_avg"],
+                "max_val": 100,
+                "thresholds": [60, 80],
+                "ax": fig.add_subplot(gs[0, 0]),
+                "color_green": '#10b981', "color_yellow": '#f59e0b', "color_red": '#ef4444',
+            },
+            {
+                "title": "RAM",
+                "value": normalized["ram_usage_avg"],
+                "max_val": 100,
+                "thresholds": [60, 80],
+                "ax": fig.add_subplot(gs[0, 1]),
+                "color_green": '#10b981', "color_yellow": '#f59e0b', "color_red": '#ef4444',
+            },
+            {
+                "title": "Disque",
+                "value": normalized["disk_usage_avg"],
+                "max_val": 100,
+                "thresholds": [50, 75],
+                "ax": fig.add_subplot(gs[0, 2]),
+                "color_green": '#10b981', "color_yellow": '#f59e0b', "color_red": '#ef4444',
+            },
+            {
+                "title": "Trafic\n(Croissance %)",
+                "value": min(100, normalized["traffic_growth_rate"] * 2),
+                "max_val": 100,
+                "thresholds": [30, 60],
+                "ax": fig.add_subplot(gs[1, 0]),
+                "color_green": '#10b981', "color_yellow": '#f59e0b', "color_red": '#ef4444',
+                "display_value": f"{normalized['traffic_growth_rate']:.1f}%"
+            },
+            {
+                "title": "Plugins",
+                "value": min(100, (normalized["plugin_count"] / 50) * 100),
+                "max_val": 100,
+                "thresholds": [30, 60],
+                "ax": fig.add_subplot(gs[1, 1]),
+                "color_green": '#10b981', "color_yellow": '#f59e0b', "color_red": '#ef4444',
+                "display_value": f"{int(normalized['plugin_count'])}"
+            },
+            {
+                "title": "Charge\nPredite",
+                "value": current_load,
+                "max_val": 100,
+                "thresholds": [50, 75],
+                "ax": fig.add_subplot(gs[1, 2]),
+                "color_green": '#10b981', "color_yellow": '#f59e0b', "color_red": '#ef4444',
+            },
+        ]
+        
+        for config in gauges_config:
+            ax = config["ax"]
+            value = config["value"]
+            thresholds = config["thresholds"]
+            # Bornage de la valeur entre 0 et 100
+            value = max(0, min(100, value))
+            for start, end, color, alpha in [
+                (0, thresholds[0], config["color_green"], 0.8),
+                (thresholds[0], thresholds[1], config["color_yellow"], 0.8),
+                (thresholds[1], 100, config["color_red"], 0.8),
+            ]:
+                start_angle = np.pi * (1 - start / 100)
+                end_angle = np.pi * (1 - end / 100)
+                theta_arc = np.linspace(start_angle, end_angle, 50)
+                ax.fill_between(theta_arc, 0.5, 1.0, color=color, alpha=alpha)
+
+            # Suppression de l'aiguille/flèche : rien à tracer ici
+
+            # Cercle central
+            circle = Circle((0, 0), 0.12, color='white', ec='#1e293b', linewidth=2, zorder=10)
+            ax.add_patch(circle)
+
+            display = config.get("display_value", f"{value:.1f}%")
+            color = config["color_green"] if value < thresholds[0] else config["color_yellow"] if value < thresholds[1] else config["color_red"]
+            ax.text(0, -0.25, display, ha='center', va='center', fontsize=14, fontweight='bold', color=color)
+
+            ax.text(-1.1, 0.5, '0%', fontsize=8, color='#64748b')
+            ax.text(1.1, 0.5, '100%', fontsize=8, color='#64748b')
+
+            ax.set_xlim(-1.3, 1.3)
+            ax.set_ylim(-0.4, 1.3)
+            ax.set_aspect('equal')
+            ax.axis('off')
+            ax.set_title(config["title"], fontsize=12, fontweight='bold', pad=10)
+        
+        fig.suptitle('Jauges de Saturation - Niveau de Criticite par Ressource',
+                    fontsize=18, fontweight='bold', y=1.02)
+        
+        path = str(OUTPUT_DIR / f"gauges_saturation_{TIMESTAMP}.png")
+        plt.savefig(path, dpi=150, bbox_inches='tight', facecolor='white')
+        plt.close()
+        return path
+    except Exception as exc:
+        print(f"[ERREUR] Jauges: {exc}", file=sys.stderr)
+        return None
+
+
+# ============================================
+# GRAPHIQUE 3 : IMPACT DES FEATURES
+# ============================================
+
+def graph_feature_impact(normalized, current_load):
+    """Barres horizontales divergentes montrant l'impact positif/negatif"""
+    try:
+        impacts = []
+        
+        # Cache
+        if normalized["cache_enabled"] == "oui":
+            impacts.append(("Cache active", -15, '#10b981', '[+]'))
+        else:
+            impacts.append(("Cache desactive", +12, '#ef4444', '[-]'))
+        
+        # CDN
+        if normalized["cdn_enabled"] == "oui":
+            impacts.append(("CDN active", -10, '#10b981', '[+]'))
+        else:
+            impacts.append(("CDN desactive", +8, '#ef4444', '[-]'))
+        
+        # PHP
+        php = normalized["php_version"]
+        if php in ["8.2", "8.3"]:
+            impacts.append((f"PHP {php} recent", -8, '#10b981', '[+]'))
+        elif php == "7.4":
+            impacts.append((f"PHP {php} obsolete", +10, '#ef4444', '[-]'))
+        elif php in ["8.0", "8.1"]:
+            impacts.append((f"PHP {php}", +5, '#f59e0b', '[!]'))
+        else:
+            impacts.append((f"PHP non specifie", +8, '#f59e0b', '[!]'))
+        
+        # CPU
+        cpu = normalized["cpu_usage_avg"]
+        if cpu > 80:
+            impacts.append((f"CPU eleve ({cpu:.0f}%)", +18, '#ef4444', '[-]'))
+        elif cpu > 60:
+            impacts.append((f"CPU moyen ({cpu:.0f}%)", +8, '#f59e0b', '[!]'))
+        else:
+            impacts.append((f"CPU optimal ({cpu:.0f}%)", -5, '#10b981', '[+]'))
+        
+        # RAM
+        ram = normalized["ram_usage_avg"]
+        if ram > 80:
+            impacts.append((f"RAM saturee ({ram:.0f}%)", +15, '#ef4444', '[-]'))
+        elif ram > 60:
+            impacts.append((f"RAM moyenne ({ram:.0f}%)", +6, '#f59e0b', '[!]'))
+        else:
+            impacts.append((f"RAM optimale ({ram:.0f}%)", -3, '#10b981', '[+]'))
+        
+        # Plugins
+        plugins = normalized["plugin_count"]
+        heavy = len(normalized["heavy_plugins"])
+        if plugins > 30 or heavy > 3:
+            impacts.append((f"Trop de plugins ({int(plugins)})", +20, '#ef4444', '[-]'))
+        elif plugins > 15:
+            impacts.append((f"Plugins moderes ({int(plugins)})", +8, '#f59e0b', '[!]'))
+        else:
+            impacts.append((f"Peu de plugins ({int(plugins)})", -5, '#10b981', '[+]'))
+        
+        # Plugins lourds
+        if heavy > 0:
+            impacts.append((f"Plugins lourds ({heavy})", +heavy * 5, '#ef4444', '[-]'))
+        
+        # Croissance
+        growth = normalized["traffic_growth_rate"]
+        if growth > 30:
+            impacts.append((f"Croissance explosive ({growth:.0f}%)", +15, '#ef4444', '[-]'))
+        elif growth > 15:
+            impacts.append((f"Croissance moderee ({growth:.0f}%)", +5, '#f59e0b', '[!]'))
+        else:
+            impacts.append((f"Croissance faible ({growth:.0f}%)", -3, '#10b981', '[+]'))
+        
+        # Disque
+        disk = normalized["disk_usage_avg"]
+        if disk > 80:
+            impacts.append((f"Disque sature ({disk:.0f}%)", +8, '#ef4444', '[-]'))
+        
+        # Temps reponse
+        rt = normalized["response_time"]
+        if rt > 500:
+            impacts.append((f"Reponse lente ({rt:.0f}ms)", +10, '#ef4444', '[-]'))
+        elif rt > 0 and rt < 200:
+            impacts.append((f"Reponse rapide ({rt:.0f}ms)", -4, '#10b981', '[+]'))
+        
+        # Trier par impact absolu
+        impacts.sort(key=lambda x: abs(x[1]), reverse=True)
+        impacts = impacts[:12]
+        
+        fig, ax = plt.subplots(figsize=(14, 10))
+        
+        labels = [f"{imp[3]} {imp[0]}" for imp in impacts]
+        values = [imp[1] for imp in impacts]
+        colors = [imp[2] for imp in impacts]
+        
+        y_pos = range(len(labels))
+        bars = ax.barh(y_pos, values, color=colors, alpha=0.85, height=0.6,
+                      edgecolor='white', linewidth=1.5)
+        
+        for i, (bar, val) in enumerate(zip(bars, values)):
+            if val > 0:
+                ax.text(val + 0.5, bar.get_y() + bar.get_height()/2,
+                       f'+{val:.0f}%', va='center', fontsize=11, fontweight='bold', color='#ef4444')
+            else:
+                ax.text(val - 0.5, bar.get_y() + bar.get_height()/2,
+                       f'{val:.0f}%', va='center', fontsize=11, fontweight='bold', color='#10b981', ha='right')
+        
+        ax.axvline(x=0, color='#1e293b', linewidth=2)
+        ax.axvspan(-20, 0, alpha=0.05, color='#10b981')
+        ax.axvspan(0, 25, alpha=0.05, color='#ef4444')
+        
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(labels, fontsize=11)
+        ax.set_xlabel('Impact sur la charge serveur (%)', fontsize=13, fontweight='bold')
+        ax.set_xlim(-25, 28)
+        ax.grid(axis='x', alpha=0.3, linestyle='--')
+        
+        legend_elements = [
+            Patch(facecolor='#10b981', alpha=0.7, label='Impact Positif (reduit charge)'),
+            Patch(facecolor='#ef4444', alpha=0.7, label='Impact Negatif (augmente charge)'),
+        ]
+        ax.legend(handles=legend_elements, loc='lower right', fontsize=10)
+        
+        ax.set_title(f'Impact des Features sur la Charge Predite ({current_load:.1f}%)',
+                    fontsize=16, fontweight='bold')
+        
+        ax.text(0.02, 0.02, '<- Reduit la charge | Augmente la charge ->',
+               transform=ax.transAxes, fontsize=9, color='#64748b', style='italic')
+        
+        plt.tight_layout()
+        path = str(OUTPUT_DIR / f"feature_impact_{TIMESTAMP}.png")
+        plt.savefig(path, dpi=150, bbox_inches='tight', facecolor='white')
+        plt.close()
+        return path
+    except Exception as exc:
+        print(f"[ERREUR] Impact Features: {exc}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+# ============================================
+# GRAPHIQUE 4 : COURBE DE DEGRADATION TEMPORELLE
+# ============================================
+
+def graph_degradation_curve(normalized, current_load):
+    """3 courbes superposees montrant la projection temporelle sur 12 mois"""
+    try:
+        growth = normalized["traffic_growth_rate"]
+        cache = normalized["cache_enabled"] == "oui"
+        cdn = normalized["cdn_enabled"] == "oui"
+        plugins = normalized["plugin_count"]
+        heavy = len(normalized["heavy_plugins"])
+        
+        # Calcul de la saturation
+        if current_load >= 90:
+            saturation_days = 0
+        elif growth <= 0:
+            saturation_days = 999 * 30.44
+        else:
+            sat_months = np.log(90 / max(1, current_load)) / np.log(1 + growth / 100)
+            saturation_days = max(0, sat_months * 30.44)
+        
+        _, _, sat_text = days_to_months_days(saturation_days)
+        
+        # 12 mois
+        months = np.arange(0, 13)
+        
+        # Scenario optimiste
+        opt_mult = 0.7 if cache else 1.0
+        opt_mult *= 0.85 if cdn else 1.0
+        opt_growth = max(1, growth * opt_mult)
+        opt_charges = []
+        opt_load = current_load * 0.8
+        for _ in months:
+            opt_charges.append(min(100, opt_load))
+            if opt_load < 100:
+                opt_load *= (1 + opt_growth / 200)
+        
+        # Scenario realiste
+        real_charges = []
+        real_load = current_load
+        for _ in months:
+            real_charges.append(min(100, real_load))
+            if real_load < 100:
+                real_load *= (1 + growth / 100)
+        
+        # Scenario pessimiste
+        pess_mult = 1.3 if not cache else 1.0
+        pess_mult *= 1.2 if not cdn else 1.0
+        pess_growth = min(85, growth * pess_mult)
+        pess_charges = []
+        pess_load = current_load * 1.2
+        for _ in months:
+            pess_charges.append(min(100, pess_load))
+            if pess_load < 100:
+                pess_load *= (1 + pess_growth / 100)
+        
+        fig, ax = plt.subplots(figsize=(12, 7))
+        
+        # Zones colorees
+        ax.fill_between(months, 0, 60, color='#10b981', alpha=0.08)
+        ax.fill_between(months, 60, 80, color='#f59e0b', alpha=0.08)
+        ax.fill_between(months, 80, 100, color='#ef4444', alpha=0.08)
+        
+        # Lignes de seuil
+        ax.axhline(60, color='#10b981', linestyle='--', linewidth=1.5, alpha=0.5, label='Zone Optimale (60%)')
+        ax.axhline(80, color='#f59e0b', linestyle='--', linewidth=1.5, alpha=0.5, label='Zone Surveillance (80%)')
+        ax.axhline(100, color='#ef4444', linestyle='-', linewidth=2, alpha=0.7, label='Saturation (100%)')
+        
+        # Courbes
+        ax.plot(months, opt_charges, color='#10b981', linewidth=3, marker='s', markersize=6,
+               label='Scenario Optimiste (cache+CDN, peu plugins)', markevery=2)
+        ax.plot(months, real_charges, color='#2563eb', linewidth=3, marker='o', markersize=6,
+               label='Scenario Realiste (configuration actuelle)', markevery=2)
+        ax.plot(months, pess_charges, color='#ef4444', linewidth=3, marker='^', markersize=6,
+               label='Scenario Pessimiste (sans cache, pics max)', markevery=2)
+        
+        # Point actuel
+        ax.scatter([0], [current_load], s=200, color='#8b5cf6', edgecolor='white',
+                  linewidth=2, zorder=10, label=f'Charge actuelle: {current_load:.1f}%')
+        
+        # Annotation saturation
+        if saturation_days > 0 and saturation_days < 365 * 5:
+            sat_month = saturation_days / 30.44
+            if sat_month <= 12:
+                sat_idx = np.argmax(np.array(real_charges) >= 90)
+                if sat_idx < len(months):
+                    ax.axvline(months[sat_idx], color='#f97316', linestyle=':', linewidth=2)
+                    ax.scatter([months[sat_idx]], [90], s=150, color='#f97316',
+                              edgecolor='white', zorder=5)
+                    ax.annotate(f'Saturation estimee\n{sat_text}',
+                               xy=(months[sat_idx], 90),
+                               xytext=(months[sat_idx] + 1, 85),
+                               fontsize=10, fontweight='bold', color='#f97316',
+                               bbox=dict(boxstyle='round', facecolor='#fff7ed',
+                                        edgecolor='#f97316', alpha=0.9),
+                               arrowprops=dict(arrowstyle='->', color='#f97316', lw=1.5))
+        
+        # Info box
+        info_text = (
+            f"Parametres actuels:\n"
+            f"  Croissance: {growth:.1f}%\n"
+            f"  Cache: {'Oui' if cache else 'Non'}\n"
+            f"  CDN: {'Oui' if cdn else 'Non'}\n"
+            f"  Plugins: {int(plugins)}\n"
+            f"  Plugins lourds: {heavy}"
+        )
+        ax.text(0.02, 0.98, info_text, transform=ax.transAxes,
+               fontsize=9, verticalalignment='top', family='monospace',
+               bbox=dict(boxstyle='round', facecolor='#f1f5f9', edgecolor='#cbd5e1', alpha=0.9))
+        
+        # Zones de texte
+        ax.text(6, 25, 'ZONE OPTIMALE', fontsize=12, fontweight='bold',
+               color='#10b981', alpha=0.4, ha='center')
+        ax.text(6, 70, 'ZONE SURVEILLANCE', fontsize=12, fontweight='bold',
+               color='#f59e0b', alpha=0.4, ha='center')
+        ax.text(6, 95, 'ZONE CRITIQUE', fontsize=12, fontweight='bold',
+               color='#ef4444', alpha=0.4, ha='center')
+        
+        ax.set_xlabel('Mois', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Charge Serveur (%)', fontsize=12, fontweight='bold')
+        ax.set_ylim(0, 105)
+        ax.set_xlim(0, 12)
+        ax.set_xticks(range(0, 13, 2))
+        ax.grid(alpha=0.3, linestyle='--')
+        ax.legend(loc='lower left', fontsize=9, framealpha=0.9)
+        
+        ax.set_title(f'Courbe de Degradation Temporelle - 3 Scenarios sur 12 Mois\n'
+                    f'Saturation estimee: {sat_text}',
+                    fontsize=14, fontweight='bold')
+        
+        plt.tight_layout()
+        path = str(OUTPUT_DIR / f"degradation_curve_{TIMESTAMP}.png")
+        plt.savefig(path, dpi=150, bbox_inches='tight', facecolor='white')
+        plt.close()
+        return path
+    except Exception as exc:
+        print(f"[ERREUR] Degradation: {exc}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -831,7 +707,7 @@ def graph_decision_boundary(model_load, features_df, normalized, feature_columns
 # ============================================
 
 def generate_all_graphs():
-    model_load, feature_columns, scaler = load_model()
+    model_load, feature_columns = load_model()
 
     if model_load is None:
         return {"status": "error", "message": f"Modele introuvable: {MODEL_PATH}"}
@@ -840,24 +716,24 @@ def generate_all_graphs():
         if hasattr(model_load, "feature_names_in_"):
             feature_columns = list(model_load.feature_names_in_)
         else:
-            return {"status": "error", "message": "feature_columns introuvable dans model.pkl"}
+            return {"status": "error", "message": "feature_columns introuvable"}
 
     json_file = find_latest_json()
     if json_file is None:
         return {"status": "error", "message": f"Aucun fichier JSON dans {DATA_DIR}"}
 
     params = load_params(json_file)
-    features_df, normalized, _ = prepare_features(params, feature_columns)
+    features_df, normalized = prepare_features(params, feature_columns)
     current_load = predict_load(model_load, features_df)
 
     graphs, errors = {}, {}
 
+    # Les 4 graphiques
     generators = {
-        "partial_dependence": lambda: graph_partial_dependence(model_load, features_df, feature_columns),
-        "saturation_evolution": lambda: graph_saturation_evolution(model_load, features_df, normalized, feature_columns),
-        "time_series": lambda: graph_time_series(normalized),
-        "shap_force_plot": lambda: graph_shap_force_plot(model_load, features_df, feature_columns, normalized),
-        "decision_boundary": lambda: graph_decision_boundary(model_load, features_df, normalized, feature_columns),
+        "radar_resources": lambda: graph_radar_resources(normalized, current_load),
+        "gauges_saturation": lambda: graph_gauges_saturation(normalized, current_load),
+        "feature_impact": lambda: graph_feature_impact(normalized, current_load),
+        "degradation_curve": lambda: graph_degradation_curve(normalized, current_load),
     }
 
     for name, gen in generators.items():

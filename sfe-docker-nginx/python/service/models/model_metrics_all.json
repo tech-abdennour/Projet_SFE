@@ -1,40 +1,79 @@
 {
-  "timestamp": "20260509_162526",
+  "timestamp": "20260514_184933",
+  "task": "plan_classification",
   "samples": 100000,
-  "target_column": "recommended_capacity_score",
-  "charge_generation": "dynamic_non_linear",
+  "target_column": "recommended_plan",
+  "plan_labels": [
+    "small",
+    "medium",
+    "performance"
+  ],
+  "plan_thresholds": {
+    "small_max": 35,
+    "medium_max": 65
+  },
+  "hosting_plans": {
+    "small": {
+      "price_dh": 39,
+      "label": "WordPress Small",
+      "max_visitors": 2000,
+      "max_plugins": 5,
+      "max_cpu": 40,
+      "max_ram": 50,
+      "cdn": false
+    },
+    "medium": {
+      "price_dh": 59,
+      "label": "WordPress Medium",
+      "max_visitors": 15000,
+      "max_plugins": 15,
+      "max_cpu": 65,
+      "max_ram": 75,
+      "cdn": true
+    },
+    "performance": {
+      "price_dh": 199,
+      "label": "WordPress Performance",
+      "max_visitors": 150000,
+      "max_plugins": 50,
+      "max_cpu": 85,
+      "max_ram": 90,
+      "cdn": true
+    }
+  },
   "performance": {
-    "rmse": 9.529375855625341,
-    "mse": 90.80900419777521,
-    "mae": 7.320864117956392,
-    "r2": 0.824287181962917,
-    "accuracy": "86.48%"
+    "accuracy_global": "78.09%",
+    "per_plan_accuracy": {
+      "small": "0.0%",
+      "medium": "81.68%",
+      "performance": "82.23%"
+    }
   },
   "train_info": {
-    "train_time_seconds": 20.0991,
+    "train_time_seconds": 8.7861,
     "test_samples": 20000,
     "train_samples": 80000
   },
   "impact_reference": {
-    "visitors_per_day": {
+    "wp_type": {
       "rank": 1,
       "impact": 5,
-      "detail": "#1 ABSOLU - Le trafic determine tout"
+      "detail": "#1 ABSOLU - Le pack WordPress (small/medium/performance) détermine tout"
+    },
+    "visitors_per_day": {
+      "rank": 2,
+      "impact": 5,
+      "detail": "Le trafic reste déterminant"
     },
     "cpu_usage_avg": {
-      "rank": 2,
+      "rank": 3,
       "impact": 5,
       "detail": "Charge processeur constante"
     },
     "ram_usage_avg": {
-      "rank": 3,
+      "rank": 4,
       "impact": 5,
       "detail": "Memoire utilisee en continu"
-    },
-    "wp_type": {
-      "rank": 4,
-      "impact": 4,
-      "detail": "small/medium/performance"
     },
     "traffic_growth_rate": {
       "rank": 5,
@@ -120,12 +159,13 @@
   "files_generated": {
     "dataset": "/app/service/data/training_dataset.csv",
     "model_pkl": "/app/service/models/model.pkl",
-    "tree_0": "/app/service/graphe/tree_0.png",
-    "tree_final": "/app/service/graphe/tree_final.png",
-    "feature_importance": "/app/service/graphe/feature_importance_20260509_162526.png",
-    "residuals": "/app/service/graphe/residus_20260509_162526.png",
-    "correlation": "/app/service/graphe/correlation_20260509_162526.png",
-    "learning_curve": "/app/service/graphe/learning_curve_20260509_162526.png",
+    "learning_curve": "/app/service/graphe/learning_curve_20260514_184933.png",
+    "correlation_matrix": "/app/service/graphe/correlation_matrix_20260514_184933.png",
+    "confusion_matrix": "/app/service/graphe/confusion_matrix_20260514_184933.png",
+    "residuals_advanced": "/app/service/graphe/residuals_advanced_20260514_184933.png",
+    "feature_importance": "/app/service/graphe/feature_importance_20260514_184933.png",
+    "tree_0": "/app/service/graphe/tree_0_20260514_184933.png",
+    "tree_final": "/app/service/graphe/tree_final_20260514_184933.png",
     "metrics_json": "/app/service/models/model_metrics_all.json"
   }
 }
