@@ -1,0 +1,6 @@
+[2026-04-29 17:08:57] 🔍 Vérification des services Docker
+[2026-04-29 17:08:57] ✅ nginx en ligne
+[2026-04-29 17:08:57] ✅ php en ligne
+[2026-04-29 17:08:57] ✅ mysql en ligne
+[2026-04-29 17:08:57] ✅ python_api en ligne
+----------------------------------------
