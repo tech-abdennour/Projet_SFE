@@ -296,13 +296,13 @@ body {
     background: rgba(59,130,246,.12);
     color: #fff;
     border-left-color: var(--primary);
-    transform: translateX(4px);
+    
 }
 
 .menu-item .menu-icon { font-size: 18px; width: 24px; text-align: center; }
 
 .active-menu {
-    background: rgba(59,130,246,.2) !important;
+    background: rgba(13, 68, 156, 0.952) !important;
     color: #fff !important;
     border-left-color: var(--primary) !important;
     font-weight: 600;

@@ -348,11 +348,12 @@ def predict(model: Any, feature_columns: list[str], params: dict[str, Any], meta
     saturation_months, saturation_jours, saturation_text = days_to_months_days(saturation_days)
     status, recommendation = build_recommendation(predicted_load, saturation_days, saturation_text)
 
-    # Calcul du taux d'erreurs applicatives estimé
+    # Calcul du taux d'erreurs applicatives estimé (formule adoucie)
     plugin_count = float(normalized.get("plugin_count", 0) or 0)
     ram_usage_max = float(normalized.get("ram_usage_max", 0) or 0)
     response_time = float(normalized.get("response_time", 0) or 0)
-    error_rate = min(100, (plugin_count * 2) + (ram_usage_max / 2) + (response_time / 100))
+    # Nouvelle formule : moins sensible, pondération réduite
+    error_rate = min(100, (plugin_count * 1.2) + (ram_usage_max / 4) + (response_time / 250))
     error_rate = round(error_rate, 2)
 
     return {

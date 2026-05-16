@@ -600,7 +600,9 @@ function displayResults(data){
     var rec = data.recommendation || 'Aucune recommandation spécifique.';
     // Supprimer la phrase "- Marge de ... avant saturation"
     if (typeof rec === 'string') {
-        rec = rec.replace(/-?\\s*Marge de [^<]* avant saturation/g, '');
+        rec = rec.replace(/-?\s*Marge de [^<]*avant saturation/g, '');
+        rec = rec.replace(/-?\s*Marge de [^<]*avant saturation/gi, '');
+        rec = rec.replace(/-?\s*Marge de [^<]*avant saturation\.?/gi, '');
     }
     rh += '<div class="recommendation-text" style="font-size:1.05em;line-height:1.6;">' + badge + rec + '</div>';
     document.getElementById('recommendationDisplay').innerHTML = rh;
