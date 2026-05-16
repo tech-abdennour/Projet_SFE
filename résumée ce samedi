@@ -1,0 +1,503 @@
+================================================================================
+🚀 SFE - SYSTÈME DE PRÉDICTION & MONITORING WORDPRESS
+================================================================================
+
+Plateforme d'analyse prédictive et de monitoring serveur pour sites WordPress,
+basée sur XGBoost et visualisation avancée.
+
+Version : 2.0
+Date : 16 Mai 2026
+Auteur : Projet Interne
+
+================================================================================
+📋 TABLE DES MATIÈRES
+================================================================================
+
+1.  Présentation Générale
+2.  Architecture du Système
+3.  Structure des Fichiers
+4.  Installation Complète
+5.  Utilisation Détaillée
+6.  Les 4 Graphiques d'Analyse
+7.  Base de Données SQLite
+8.  Sécurité
+9.  Dépannage
+10. Licence
+
+================================================================================
+🎯 1. PRÉSENTATION GÉNÉRALE
+================================================================================
+
+SFE (Système de Prédiction & Monitoring WordPress) est une solution
+complète pour prédire la charge serveur et analyser les risques sur un
+site WordPress. Elle s'appuie sur un modèle XGBoost entraîné et génère
+des graphiques dynamiques pour visualiser l'impact des paramètres clés.
+
+Fonctionnalités Principales
+----------------------------
+- Authentification sécurisée avec sessions PHP
+- Formulaire de saisie pour 22 paramètres WordPress
+- Prédiction XGBoost via API Python FastAPI
+- Génération automatique de 4 graphiques d'analyse
+- Sauvegarde et historique des analyses en SQLite
+- Export CSV complet de l'historique
+- Interface responsive avec onglets
+- Gestion de corbeille (archivage/restauration)
+- Visualisation : radar, histogramme, jauge, projection
+
+Paramètres Analysés (22 paramètres)
+------------------------------------
+TRAFIC :
+  - Visiteurs par jour (*)
+  - Pages vues par jour
+  - Taux de croissance mensuel (%) (*)
+  - Heures de pointe (début/fin)
+
+RESSOURCES SERVEUR :
+  - CPU usage moyen (%) (*)
+  - CPU usage pic (%) (*)
+  - RAM usage moyen (%) (*)
+  - RAM usage max (%) (*)
+  - Disque usage moyen (%)
+  - Disque usage max (%)
+  - Temps de réponse (ms)
+  - IOPS lecture
+  - IOPS écriture
+
+WORDPRESS :
+  - Nombre de plugins (*)
+  - Plugins lourds (WooCommerce, Elementor, WPML, Yoast, RevSlider, Gravity Forms)
+  - Version PHP (7.4, 8.0, 8.1, 8.2, 8.3)
+  - Cache activé (oui/non)
+  - CDN activé (oui/non)
+  - Pack WordPress (*) : Small / Medium / Performance
+
+(*) Champs obligatoires
+
+================================================================================
+🏗️ 2. ARCHITECTURE DU SYSTÈME
+================================================================================
+
+                        APPLICATION SFE
+    ┌─────────────────────────────────────────────────────┐
+    │                                                     │
+    │  ┌──────────┐      ┌──────────────┐                 │
+    │  │ index.php │─────→│ dashboard.php│                 │
+    │  │(connexion)│      │  (interface) │                 │
+    │  └──────────┘      └──────┬───────┘                 │
+    │                           │                         │
+    │                           ▼                         │
+    │                    ┌──────────────┐                 │
+    │                    │   API Python │                 │
+    │                    │  (FastAPI)   │                 │
+    │                    │  port 8000   │                 │
+    │                    └──────┬───────┘                 │
+    │                           │                         │
+    │              ┌────────────┼────────────┐            │
+    │              ▼            ▼            ▼            │
+    │     ┌────────────┐ ┌──────────┐ ┌──────────┐       │
+    │     │ model.pkl  │ │ Graphes  │ │ SQLite DB│       │
+    │     │ (XGBoost)  │ │ (PNG)    │ │(.db)     │       │
+    │     └────────────┘ └──────────┘ └──────────┘       │
+    │                                                     │
+    │  ┌──────────────────────────────────────────┐       │
+    │  │         DB Browser for SQLite            │       │
+    │  │    (visualisation/modification DB)       │       │
+    │  └──────────────────────────────────────────┘       │
+    └─────────────────────────────────────────────────────┘
+
+Flux de Données Détaillé
+-------------------------
+1. L'utilisateur se connecte via index.php
+2. Il saisit les paramètres dans le formulaire du dashboard
+3. Validation côté client (JavaScript) : pas de valeurs négatives
+4. Envoi POST à l'API Python : /api/save-and-predict-json
+5. L'API sauvegarde les paramètres en JSON dans Donnee_parametres/
+6. L'API lance la prédiction avec le modèle XGBoost (model.pkl)
+7. Le résultat est renvoyé au dashboard (JSON)
+8. Affichage des scores et recommandations dans l'onglet "Résultats"
+9. L'utilisateur clique sur "Créer les graphiques"
+10. L'API exécute graphe_xgboost_parameters.py
+11. Les 4 graphiques PNG sont générés dans analysis_exports/
+12. Les URLs des graphiques sont renvoyées au dashboard
+13. Affichage des graphiques dans l'onglet "Graphiques"
+14. Sauvegarde automatique dans SQLite (3 tables)
+15. Possibilité d'exporter tout l'historique en CSV
+
+================================================================================
+📁 3. STRUCTURE DES FICHIERS
+================================================================================
+
+sfe-docker-nginx/
+│
+├── app/
+│   ├── index.php                         # Page de connexion
+│   ├── dashboard.php                     # Interface utilisateur principale
+│   ├── vala_bleu.db                      # Base de données SQLite
+│   ├── styles.css                        # Styles CSS
+│   └── icons/                            # Icônes SVG/PNG
+│       ├── resultas.png
+│       ├── historique.png
+│       └── corbeille.png
+│
+├── backups/
+│   └── full_app_YYYY-MM-DD_HH-MM-SS/     # Sauvegardes horodatées
+│
+├── docs/                                # Documentation
+├── logs/                                # Logs serveur
+├── mysql/                               # Configuration MySQL
+├── nginx/                               # Configuration Nginx
+├── php/                                 # Configuration PHP
+│
+├── python/
+│   ├── Donnee_parametres/               # Fichiers JSON d'entrée
+│   │   └── parametres_prediction_*.json
+│   │
+│   ├── script/
+│   │   └── __pycache__/
+│   │
+│   ├── service/
+│   │   ├── analysis_exports/            # Graphiques PNG générés
+│   │   │   ├── courbe_erreur_vs_charge_*.png
+│   │   │   ├── graph_erreur_rate_contribution_*.png
+│   │   │   ├── courbe_projection_saturation_*.png
+│   │   │   └── barres_impact_features_*.png
+│   │   │
+│   │   ├── data/                        # Données d'entraînement
+│   │   ├── graphe/                      # Scripts de graphiques (obsolète)
+│   │   ├── models/
+│   │   │   └── model.pkl               # Modèle XGBoost principal
+│   │   ├── output/                      # Sorties diverses
+│   │   ├── graphe_xgboost_parameters.py # Script principal de graphiques
+│   │   ├── train_xgboost_model.py       # Script d'entraînement du modèle
+│   │   ├── predict_from_file.py         # API de prédiction
+│   │   ├── api.py                       # API FastAPI
+│   │   └── __pycache__/
+│   │
+│   └── __pycache__/
+│
+└── scripts/                             # Scripts utilitaires
+
+================================================================================
+🚀 4. INSTALLATION COMPLÈTE
+================================================================================
+
+Prérequis
+---------
+- Python 3.10 ou supérieur
+- PHP 8.0 ou supérieur
+- Docker et Docker Compose (optionnel)
+- pip (gestionnaire de packages Python)
+- DB Browser for SQLite (pour visualiser la base)
+
+Packages Python Requis
+----------------------
+pip install xgboost scikit-learn pandas numpy joblib fastapi uvicorn matplotlib Pillow
+
+Étapes d'Installation
+---------------------
+1. Cloner/copier le projet dans le répertoire cible
+2. Installer les dépendances Python
+3. Entraîner le modèle XGBoost :
+   cd python/service
+   python train_xgboost_model.py
+4. Vérifier que model.pkl est créé dans python/service/models/
+5. Lancer l'API Python :
+   cd python/service
+   uvicorn api:app --host 0.0.0.0 --port 8000 --reload
+6. Configurer Nginx pour servir l'application PHP
+7. Accéder au dashboard : http://localhost/
+
+Installation avec Docker
+------------------------
+docker-compose up -d
+
+Vérification de l'Installation
+------------------------------
+- API Python : http://localhost:8000/health
+- Dashboard : http://localhost/dashboard.php
+- DB Browser : Ouvrir app/vala_bleu.db
+
+================================================================================
+📖 5. UTILISATION DÉTAILLÉE
+================================================================================
+
+Interface Web (dashboard.php)
+-----------------------------
+1. CONNEXION
+   - Accéder à index.php
+   - Saisir identifiants
+   - Redirection vers dashboard.php
+
+2. SAISIE DES PARAMÈTRES (Onglet Paramètres)
+   - Remplir les champs obligatoires (marqués *)
+   - Onglet "Trafic" : visiteurs, pages vues, croissance
+   - Onglet "Serveur" : CPU, RAM, disque, temps réponse
+   - Onglet "WordPress" : plugins, PHP, cache, CDN
+   - Validation automatique : pas de valeurs négatives
+
+3. LANCEMENT DE L'ANALYSE
+   - Cliquer sur "LANCER L'ANALYSE"
+   - Redirection automatique vers l'onglet "Résultats"
+   - Affichage des scores et recommandations
+
+4. GÉNÉRATION DES GRAPHIQUES (Onglet Graphiques)
+   - Cliquer sur "Créer les graphiques"
+   - Les 4 graphiques apparaissent dans une galerie
+   - Possibilité de télécharger chaque graphique
+   - Liens vers les graphiques d'entraînement (tree, feature importance...)
+
+5. GESTION DES SAUVEGARDES
+   - Onglet "Sauvegardes" : sauvegarde manuelle
+   - Onglet "Historique" : toutes les analyses
+   - Onglet "Corbeille" : éléments archivés
+
+6. EXPORT CSV
+   - Bouton "Exporter tout en CSV" dans l'historique
+   - Téléchargement d'un fichier CSV complet
+
+Script Python en Ligne de Commande
+----------------------------------
+cd python/service
+python graphe_xgboost_parameters.py
+
+- Lit le dernier fichier JSON dans Donnee_parametres/
+- Génère les 4 graphiques dans analysis_exports/
+- Affiche le résultat JSON
+
+================================================================================
+📊 6. LES 4 GRAPHIQUES D'ANALYSE
+================================================================================
+
+Le système génère 4 graphiques complémentaires :
+
+G1 - RADAR COMPARATIF DES PLANS
+--------------------------------
+Fichier : courbe_erreur_vs_charge_*.png
+
+Type : Graphique en araignée à 6 axes
+Superpose : Small (vert continu), Medium (orange pointillé),
+            Performance (rouge tirets)
+Profil bleu : Position actuelle du site
+
+Axes normalisés de 0% à 100% :
+  - Visiteurs/j : 2 000 / 15 000 / 150 000
+  - Plugins max : 5 / 15 / 50
+  - CPU max : 40% / 65% / 85%
+  - RAM max : 50% / 75% / 90%
+  - Stockage : 20 Go / 100 Go / 500 Go
+  - Support : Standard / Prioritaire / Premium
+
+Points bleus : Valeurs actuelles du site sur chaque axe
+Texte gris : Résumé des valeurs actuelles
+
+G2 - CONTRIBUTION AU TAUX D'ERREUR
+------------------------------------
+Fichier : graph_erreur_rate_contribution_*.png
+
+Type : Dashboard multi-vues (3 sous-graphiques)
+
+Sous-graphique 1 : Histogramme des contributions
+  - Barre bleue : Contribution des plugins (plugin_count × 1.2%)
+  - Barre orange : Contribution RAM (ram_usage_max ÷ 4)
+  - Barre rouge : Contribution temps réponse (response_time ÷ 250)
+  - Ligne violette : Cumul jusqu'au taux d'erreur final
+  - Zones de risque colorées en fond
+
+Sous-graphique 2 : Jauge circulaire
+  - Demi-cercle avec aiguille
+  - Couleur selon niveau : vert (<30%), jaune (30-60%),
+    orange (60-85%), rouge (>85%)
+  - Valeur en grand au centre
+
+Sous-graphique 3 : Camembert de répartition
+  - Pourcentage d'impact de chaque paramètre
+
+Formule : error_rate = min(100, (plugin_count × 1.2) + (ram_usage_max / 4) + (response_time / 250))
+
+G3 - COURBE DE PROJECTION SATURATION
+-------------------------------------
+Fichier : courbe_projection_saturation_*.png
+
+Type : Courbe temporelle
+Projection de la charge serveur mois par mois
+
+Zones colorées :
+  - Vert : Zone optimale (0-60%)
+  - Jaune : Zone surveillance (60-80%)
+  - Rouge : Zone critique (80-100%)
+
+Éléments :
+  - Point actuel : Charge actuelle
+  - Ligne bleue : Projection avec croissance mensuelle
+  - Ligne rouge : Seuil de saturation (90%)
+  - Point orange : Point de rupture avec annotation
+  - Annotation : "X mois et Y jours avant saturation"
+
+G4 - BARRES D'IMPACT DES FEATURES
+----------------------------------
+Fichier : barres_impact_features_*.png
+
+Type : Barres horizontales divergentes
+
+Barres vertes (gauche) : Réduisent la charge
+  - Cache activé, CDN activé, PHP récent, Pack performance
+
+Barres rouges (droite) : Augmentent la charge
+  - CPU élevé, RAM élevée, Plugins nombreux, Croissance forte
+
+Trié par impact décroissant (valeur absolue)
+
+================================================================================
+🗄️ 7. BASE DE DONNÉES SQLITE
+================================================================================
+
+Fichier : app/vala_bleu.db
+
+Outil Recommandé : DB Browser for SQLite
+  - Téléchargement : https://sqlitebrowser.org/
+  - Ouvrir le fichier vala_bleu.db
+  - Visualiser/modifier les données
+  - Exécuter des requêtes SQL
+
+Structure (3 tables)
+--------------------
+
+Table 1 : predictions
+---------------------
+Analyses actives (non supprimées)
+
+Colonnes principales :
+  - id TEXT PRIMARY KEY       : Identifiant unique
+  - user TEXT                 : Utilisateur propriétaire
+  - created_at TEXT           : Date/heure de création
+  - cpu_usage_avg TEXT        : CPU moyen (%)
+  - cpu_usage_peak TEXT       : CPU pic (%)
+  - ram_usage_avg TEXT        : RAM moyenne (%)
+  - ram_usage_max TEXT        : RAM max (%)
+  - disk_usage_avg TEXT       : Disque moyen (%)
+  - disk_usage_max TEXT       : Disque max (%)
+  - disk_read_iops TEXT       : IOPS lecture
+  - disk_write_iops TEXT      : IOPS écriture
+  - response_time TEXT        : Temps réponse (ms)
+  - visitors_per_day TEXT     : Visiteurs par jour
+  - pageviews_per_day TEXT    : Pages vues par jour
+  - traffic_growth_rate TEXT  : Taux de croissance (%)
+  - peak_hours_start TEXT     : Début heures de pointe
+  - peak_hours_end TEXT       : Fin heures de pointe
+  - plugin_count TEXT         : Nombre de plugins
+  - heavy_plugins TEXT        : Plugins lourds (liste)
+  - php_version TEXT          : Version PHP
+  - cache_enabled TEXT        : Cache activé
+  - cdn_enabled TEXT          : CDN activé
+  - wp_type TEXT              : Type de pack
+  - predicted_load TEXT       : Charge prédite (%)
+  - error_rate TEXT           : Taux d'erreur (%)
+  - saturation_days TEXT      : Jours avant saturation
+  - saturation_months TEXT    : Mois avant saturation
+  - saturation_jours TEXT     : Jours restants
+  - saturation_text TEXT      : Texte saturation
+  - saturation_months_raw TEXT: Mois bruts
+  - status TEXT               : Statut (CRITIQUE, etc.)
+  - recommendation TEXT       : Recommandation
+  - save_type TEXT            : Type de sauvegarde
+  - is_deleted INTEGER        : 0=actif, 1=archivé
+
+Table 2 : deleted_sauvegardes
+-----------------------------
+Analyses archivées (corbeille)
+
+Colonnes : Identiques à predictions + deleted_at
+
+Table 3 : saved_results
+------------------------
+Résultats et graphiques sauvegardés
+
+Colonnes :
+  - id TEXT PRIMARY KEY       : Identifiant unique
+  - created_at TEXT           : Date/heure
+  - data_json TEXT            : Données complètes en JSON
+  - save_type TEXT            : 'graphiques', 'resultat', 'parametres'
+
+Opérations Disponibles
+----------------------
+- Archivage : Déplace une analyse vers la corbeille
+- Restauration : Remet une analyse dans l'historique
+- Suppression définitive : Efface de la corbeille
+- Vider la corbeille : Supprime tout
+
+================================================================================
+🔐 8. SÉCURITÉ
+================================================================================
+
+- Sessions PHP sécurisées avec timeouts
+- Validation des entrées utilisateur (JavaScript + API)
+- Protection contre les valeurs négatives
+- Échappement HTML (htmlspecialchars)
+- Headers HTTP de sécurité
+- Isolation des données par utilisateur (clause WHERE user =)
+- API Python avec validation des types
+- Fichiers sensibles hors du document root web
+- Sauvegardes automatiques
+
+================================================================================
+🔧 9. DÉPANNAGE
+================================================================================
+
+Problèmes Courants et Solutions
+--------------------------------
+
+Le modèle ne se charge pas
+--------------------------
+- Vérifier : python/service/models/model.pkl existe
+- Solution : Ré-entraîner avec train_xgboost_model.py
+
+L'API ne répond pas
+-------------------
+- Vérifier : uvicorn api:app --host 0.0.0.0 --port 8000
+- Tester : curl http://localhost:8000/health
+- Vérifier le port dans la configuration Nginx
+
+Erreur "feature_columns introuvable"
+------------------------------------
+- Le modèle doit avoir l'attribut feature_names_in_
+- Solution : Ré-entraîner avec les données complètes
+
+Graphiques non générés
+----------------------
+- Vérifier les logs Python
+- Vérifier : analysis_exports/ existe et est accessible
+- Vérifier : matplotlib utilise le backend 'Agg'
+
+Erreur de conversion string/float
+----------------------------------
+- Vérifier les valeurs dans HOSTING_PLANS
+- Les valeurs textuelles doivent être converties en nombres
+
+Base de données corrompue
+-------------------------
+- Fermer DB Browser avant d'écrire
+- Sauvegarder vala_bleu.db régulièrement
+- Utiliser "Vérifier l'intégrité" dans DB Browser
+
+DB Browser for SQLite - Opérations Utiles
+-----------------------------------------
+- Ouvrir la base : Fichier > Ouvrir > vala_bleu.db
+- Parcourir les données : Onglet "Parcourir les données"
+- Exécuter SQL : Onglet "Exécuter SQL"
+- Exporter : Fichier > Exporter > Table vers CSV
+- Modifier : Double-clic sur une cellule
+- Structure : Onglet "Structure de la base de données"
+
+================================================================================
+📝 10. LICENCE
+================================================================================
+
+Projet interne - Tous droits réservés © 2026
+
+Développé pour l'analyse prédictive de charge serveur WordPress.
+Basé sur XGBoost, FastAPI, PHP et SQLite.
+
+================================================================================
+                              FIN DU DOCUMENT
+================================================================================
