@@ -1,5 +1,0 @@
-[2026-04-13 16:36:41] 🔍 Vérification des services Docker
-[2026-04-13 16:36:41] ⚠️  nginx_web n'existe pas
-[2026-04-13 16:36:41] ⚠️  php_fpm n'existe pas
-[2026-04-13 16:36:41] ⚠️  mariadb_db n'existe pas
-----------------------------------------
