@@ -2,11 +2,11 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Installer graphviz pour les arbres XGBoost
+# Installer graphviz pour les arbres XGBoost ET curl pour le healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
     graphviz \
+    curl \
     && rm -rf /var/lib/apt/lists/*
-
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir pydot

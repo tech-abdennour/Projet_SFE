@@ -1,5 +1,5 @@
 {
-  "timestamp": "20260514_184933",
+  "timestamp": "20260518_085508",
   "task": "plan_classification",
   "samples": 100000,
   "target_column": "recommended_plan",
@@ -15,7 +15,7 @@
   "hosting_plans": {
     "small": {
       "price_dh": 39,
-      "label": "WordPress Small",
+      "label": "SMALL",
       "max_visitors": 2000,
       "max_plugins": 5,
       "max_cpu": 40,
@@ -24,7 +24,7 @@
     },
     "medium": {
       "price_dh": 59,
-      "label": "WordPress Medium",
+      "label": "MEDIUM",
       "max_visitors": 15000,
       "max_plugins": 15,
       "max_cpu": 65,
@@ -33,7 +33,7 @@
     },
     "performance": {
       "price_dh": 199,
-      "label": "WordPress Performance",
+      "label": "PERFORMANCE",
       "max_visitors": 150000,
       "max_plugins": 50,
       "max_cpu": 85,
@@ -42,15 +42,15 @@
     }
   },
   "performance": {
-    "accuracy_global": "78.09%",
+    "accuracy_global": "79.75%",
     "per_plan_accuracy": {
-      "small": "0.0%",
-      "medium": "81.68%",
-      "performance": "82.23%"
+      "small": "11.17%",
+      "medium": "82.56%",
+      "performance": "84.47%"
     }
   },
   "train_info": {
-    "train_time_seconds": 8.7861,
+    "train_time_seconds": 17.831,
     "test_samples": 20000,
     "train_samples": 80000
   },
@@ -159,13 +159,13 @@
   "files_generated": {
     "dataset": "/app/service/data/training_dataset.csv",
     "model_pkl": "/app/service/models/model.pkl",
-    "learning_curve": "/app/service/graphe/learning_curve_20260514_184933.png",
-    "correlation_matrix": "/app/service/graphe/correlation_matrix_20260514_184933.png",
-    "confusion_matrix": "/app/service/graphe/confusion_matrix_20260514_184933.png",
-    "residuals_advanced": "/app/service/graphe/residuals_advanced_20260514_184933.png",
-    "feature_importance": "/app/service/graphe/feature_importance_20260514_184933.png",
-    "tree_0": "/app/service/graphe/tree_0_20260514_184933.png",
-    "tree_final": "/app/service/graphe/tree_final_20260514_184933.png",
+    "learning_curve": "/app/service/graphe/learning_curve_20260518_085508.png",
+    "correlation_matrix": "/app/service/graphe/correlation_matrix_20260518_085508.png",
+    "confusion_matrix": "/app/service/graphe/confusion_matrix_20260518_085508.png",
+    "residuals_advanced": "/app/service/graphe/residuals_advanced_20260518_085508.png",
+    "feature_importance": "/app/service/graphe/feature_importance_20260518_085508.png",
+    "tree_0": "/app/service/graphe/tree_0_20260518_085508.png",
+    "tree_final": "/app/service/graphe/tree_final_20260518_085508.png",
     "metrics_json": "/app/service/models/model_metrics_all.json"
   }
 }

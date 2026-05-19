@@ -23,27 +23,38 @@ else:
     MODEL_PATH = BASE_DIR / "models" / "model.pkl"
     PARAMS_DIR = BASE_DIR.parent / "Donnee_parametres"
 
-HEAVY_PLUGIN_OPTIONS = [
-    "woocommerce",
-    "elementor",
-    "wpml",
-    "yoast",
-    "revslider",
-    "gravityforms",
-]
 
+HEAVY_PLUGIN_OPTIONS = [
+    "woocommerce", "elementor", "wpml", "jetpack",
+    "buddypress", "yoast", "wordfence",
+]
 PHP_VERSIONS = ["7.4", "8.0", "8.1", "8.2", "8.3"]
 WP_TYPES = ["small", "medium", "performance"]
 PLAN_LABELS = ["small", "medium", "performance"]
 
-# Correspondance Plan → Score de charge estimé (milieu de la plage)
-PLAN_TO_LOAD_SCORE = {
-    "small": 17.5,        # Milieu de [0, 35]
-    "medium": 50.0,       # Milieu de [35, 65]
-    "performance": 82.5,  # Milieu de [65, 100]
+# ═══════════════════════════════════════════════════════════════════════════
+# CORRECTION : wp_type COMME DIVISEUR DE CHARGE (#1 absolu)
+# ═══════════════════════════════════════════════════════════════════════════
+WP_CHARGE_DIVISORS = {
+    "small": 1.0,        # Charge brute non réduite
+    "medium": 2.8,       # Charge divisée par 2.8 (pack plus puissant)
+    "performance": 8.5,  # Charge divisée par 8.5 (pack très puissant)
 }
 
-# Seuils de classification
+# Saturation de base selon le pack (en heures)
+WP_SATURATION_BASE_HOURS = {
+    "small": 2.0,
+    "medium": 8.0,
+    "performance": 24.0,
+}
+
+# Correspondance Plan → Score de charge estimé (milieu de la plage)
+PLAN_TO_LOAD_SCORE = {
+    "small": 17.5,
+    "medium": 50.0,
+    "performance": 82.5,
+}
+
 PLAN_THRESHOLDS = [35, 65]
 
 
@@ -57,6 +68,18 @@ def load_model() -> tuple[Any | None, list[str] | None, dict[str, Any] | None]:
         model = payload.get("model")
         feature_columns = payload.get("feature_columns")
         metadata = payload
+
+        global HEAVY_PLUGIN_OPTIONS, PHP_VERSIONS, WP_TYPES, PLAN_LABELS
+        if "heavy_plugin_options" in payload:
+            HEAVY_PLUGIN_OPTIONS = payload["heavy_plugin_options"]
+        if "categorical_options" in payload:
+            cat = payload["categorical_options"]
+            if "php_version" in cat:
+                PHP_VERSIONS = cat["php_version"]
+            if "wp_type" in cat:
+                WP_TYPES = cat["wp_type"]
+        if "plan_labels" in payload:
+            PLAN_LABELS = payload["plan_labels"]
     else:
         model = payload
         feature_columns = None
@@ -154,46 +177,38 @@ def normalize_params(params: dict[str, Any]) -> dict[str, Any]:
 def calculate_load_score_from_params(normalized: dict[str, Any]) -> float:
     """
     Calcule un score de charge estimé basé sur les paramètres normalisés.
-    C'est une approximation basée sur la logique métier des plans d'hébergement.
     """
     score = 0.0
     
-    # Facteur trafic (0-35 points)
     visitors = normalized["visitors_per_day"]
     if visitors > 0:
-        # Small: max 2000, Medium: max 15000, Performance: max 150000
         traffic_ratio = min(visitors / 150000, 1.0)
         score += traffic_ratio * 35
     
-    # Facteur CPU (0-25 points)
     cpu_avg = normalized["cpu_usage_avg"]
     cpu_peak = normalized["cpu_usage_peak"]
     score += (cpu_avg / 100) * 15
     score += (cpu_peak / 100) * 10
     
-    # Facteur RAM (0-15 points)
     ram_avg = normalized["ram_usage_avg"]
     ram_max = normalized["ram_usage_max"]
     score += (ram_avg / 100) * 8
     score += (ram_max / 100) * 7
     
-    # Facteur plugins (0-10 points)
     plugin_count = normalized["plugin_count"]
     heavy_plugins_count = len(normalized["heavy_plugins"])
     score += min((plugin_count / 50) * 5, 5)
     score += min(heavy_plugins_count * 2, 5)
     
-    # Facteur croissance (0-10 points)
     growth = normalized["traffic_growth_rate"]
     score += min((growth / 85) * 10, 10)
     
-    # Facteur performance (0-5 points)
     response_time = normalized["response_time"]
     score += min((response_time / 5000) * 5, 5)
     
     return round(min(max(score, 1.0), 100.0), 2)
 
-
+              
 def prepare_features(params: dict[str, Any], feature_columns: list[str]) -> tuple[pd.DataFrame, dict[str, Any]]:
     normalized = normalize_params(params)
     heavy_plugins = set(normalized["heavy_plugins"])
@@ -223,32 +238,23 @@ def prepare_features(params: dict[str, Any], feature_columns: list[str]) -> tupl
                        len(heavy_plugins) * 2),
     }
 
-    # One-hot encoding des heavy plugins
     for plugin in HEAVY_PLUGIN_OPTIONS:
         row[f"heavy_plugin_{plugin}"] = 1 if plugin in heavy_plugins else 0
 
-    # One-hot encoding des versions PHP
     for version in PHP_VERSIONS:
         row[f"php_{version}"] = 1 if normalized["php_version"] == version else 0
 
-    # One-hot encoding cache/cdn
     for value in ["non", "oui"]:
         row[f"cache_{value}"] = 1 if normalized["cache_enabled"] == value else 0
         row[f"cdn_{value}"] = 1 if normalized["cdn_enabled"] == value else 0
 
-    # One-hot encoding wp_type
     for wp_type in WP_TYPES:
         row[f"wp_{wp_type}"] = 1 if normalized["wp_type"] == wp_type else 0
 
     row["peak_duration_minutes"] = max(0, row["peak_hours_end_minutes"] - row["peak_hours_start_minutes"])
 
-    # Créer le DataFrame avec toutes les colonnes attendues
     features = pd.DataFrame([{column: row.get(column, 0) for column in feature_columns}])
     features = features.astype(float)
-    
-    # Debug
-    print(f"Nombre de features avec valeurs non-nulles: {(features.iloc[0] != 0).sum()}", file=sys.stderr)
-    print(f"Features non-nulles: {[col for col in features.columns if features[col].iloc[0] != 0]}", file=sys.stderr)
     
     return features, normalized
 
@@ -293,77 +299,77 @@ def build_recommendation(predicted_load: float, saturation_days: float, saturati
 
 def predict(model: Any, feature_columns: list[str], params: dict[str, Any], metadata: dict[str, Any] = None) -> dict[str, Any]:
     features, normalized = prepare_features(params, feature_columns)
-    
-    # Debug
-    print("Features envoyées au modèle :", features.to_dict(orient="records"), file=sys.stderr)
 
-    # Vérifier si c'est un classifieur
-    is_classifier = hasattr(model, 'predict_proba')
+    # ═══════════════════════════════════════════════════════════════
+    # CORRECTION PRINCIPALE : wp_type détermine la charge prédite
+    # ═══════════════════════════════════════════════════════════════
+    wp_type = normalized.get("wp_type", "small")
     
-    if is_classifier:
-        # CLASSIFIEUR : Convertir la classe prédite en score de charge
-        predicted_class = int(model.predict(features)[0])
-        probabilities = model.predict_proba(features)[0]
-        
-        # Récupérer les noms des plans depuis les métadonnées ou utiliser les labels par défaut
-        plan_labels = metadata.get("plan_labels", PLAN_LABELS) if metadata else PLAN_LABELS
-        predicted_plan = plan_labels[predicted_class] if predicted_class < len(plan_labels) else "unknown"
-        
-        # Convertir le plan en score de charge estimé
-        # On utilise une interpolation basée sur les probabilités pour plus de précision
-        if len(probabilities) == 3:
-            # Score pondéré par les probabilités
-            load_scores = [PLAN_TO_LOAD_SCORE[plan] for plan in plan_labels]
-            predicted_load = sum(prob * score for prob, score in zip(probabilities, load_scores))
-        else:
-            # Fallback : utiliser le score du plan prédit
-            predicted_load = PLAN_TO_LOAD_SCORE.get(predicted_plan, 50.0)
-        
-        predicted_load = round(min(100.0, max(0.0, predicted_load)), 2)
-        
-        print(f"Classe prédite: {predicted_class} -> Plan: {predicted_plan}", file=sys.stderr)
-        print(f"Probabilités: {dict(zip(plan_labels, probabilities))}", file=sys.stderr)
-        print(f"Score de charge estimé: {predicted_load}", file=sys.stderr)
-    else:
-        # RÉGRESSEUR : utiliser directement la prédiction
-        predicted_load = float(model.predict(features)[0])
-        predicted_load = round(min(100.0, max(0.0, predicted_load)), 2)
-        print(f"Predicted load brut: {predicted_load}", file=sys.stderr)
-
-    # Calcul de la saturation (même logique qu'avant)
+    # 1. Calculer la charge BRUTE (avant division par le pack)
+    raw_load = calculate_load_score_from_params(normalized)
+    
+    # 2. Appliquer le diviseur wp_type
+    wp_divisor = WP_CHARGE_DIVISORS.get(wp_type, 1.0)
+    predicted_load = raw_load / wp_divisor
+    predicted_load = round(min(100.0, max(1.0, predicted_load)), 2)
+    
+    # 3. Calculer la saturation (basée sur le pack + charge)
+    wp_saturation_base = WP_SATURATION_BASE_HOURS.get(wp_type, 2.0)
     growth = max(0.0, float(normalized["traffic_growth_rate"] or 0.0))
-
+    
     if predicted_load >= 90:
-        saturation_months_raw = 0.0
         saturation_days = 0.0
     elif growth <= 0:
-        saturation_months_raw = 999.0
         saturation_days = 999.0 * 30.44
     else:
+        # La saturation dépend de la charge ET du pack
+        # Pack supérieur = plus de temps avant saturation
+        load_ratio = predicted_load / 90.0
         saturation_months_raw = float(
-            np.log(90 / max(1.0, predicted_load)) / np.log(1 + growth / 100)
+            np.log(1.0 / max(0.01, load_ratio)) / np.log(1 + growth / 100)
         )
+        # Bonus de saturation selon le pack
+        saturation_months_raw *= wp_saturation_base / 2.0
         saturation_days = max(0.0, saturation_months_raw * 30.44)
 
     saturation_months, saturation_jours, saturation_text = days_to_months_days(saturation_days)
     status, recommendation = build_recommendation(predicted_load, saturation_days, saturation_text)
 
-    # Calcul du taux d'erreurs applicatives estimé (formule adoucie)
+    # Calcul du taux d'erreurs
     plugin_count = float(normalized.get("plugin_count", 0) or 0)
     ram_usage_max = float(normalized.get("ram_usage_max", 0) or 0)
     response_time = float(normalized.get("response_time", 0) or 0)
-    # Nouvelle formule : moins sensible, pondération réduite
-    error_rate = min(100, (plugin_count * 1.2) + (ram_usage_max / 4) + (response_time / 250))
-    error_rate = round(error_rate, 2)
+
+    # Limiter les contributions extrêmes
+    plugin_contribution = min(plugin_count * 1.2, 30)  # Limite à 30 %
+    ram_contribution = min(ram_usage_max / 4, 25)      # Limite à 25 %
+    response_contribution = min(response_time / 250, 45)  # Limite à 45 %
+
+    error_rate = plugin_contribution + ram_contribution + response_contribution
+    error_rate = round(min(100, error_rate), 2)
+
+    print(f"Taux d'erreur ajusté : {error_rate}%", file=sys.stderr)
+
+    print(f"╔══════════════════════════════════════╗", file=sys.stderr)
+    print(f"║  RÉSULTAT PRÉDICTION                 ║", file=sys.stderr)
+    print(f"╠══════════════════════════════════════╣", file=sys.stderr)
+    print(f"║  wp_type        : {wp_type:<18} ║", file=sys.stderr)
+    print(f"║  Charge brute   : {raw_load:<18.1f} ║", file=sys.stderr)
+    print(f"║  Diviseur pack  : x{wp_divisor:<17.1f} ║", file=sys.stderr)
+    print(f"║  Charge prédite : {predicted_load:<18.1f} ║", file=sys.stderr)
+    print(f"║  Saturation     : {saturation_text:<18} ║", file=sys.stderr)
+    print(f"╚══════════════════════════════════════╝", file=sys.stderr)
 
     return {
         "predicted_load": predicted_load,
+        "raw_load": round(raw_load, 2),
+        "wp_divisor": wp_divisor,
+        "wp_type": wp_type,
         "error_rate": error_rate,
         "saturation_days": round(float(saturation_days), 2),
         "saturation_months": saturation_months,
         "saturation_jours": saturation_jours,
         "saturation_text": saturation_text,
-        "saturation_months_raw": round(float(saturation_months_raw), 2),
         "status": status,
         "recommendation": recommendation,
         "normalized_parameters": normalized,
@@ -396,7 +402,7 @@ def predict_from_json() -> dict[str, Any]:
                     "predicted_load": None,
                     "saturation_text": "Colonnes introuvables",
                     "status": "ERREUR",
-                    "recommendation": "Réentraîne le modèle pour sauvegarder feature_columns dans model.pkl.",
+                    "recommendation": "Réentraîne le modèle.",
                 }
             },
         }
@@ -412,7 +418,7 @@ def predict_from_json() -> dict[str, Any]:
                     "predicted_load": None,
                     "saturation_text": "Aucun paramètre trouvé",
                     "status": "ERREUR",
-                    "recommendation": "Ajoute un fichier JSON dans /app/Donnee_parametres avant la prédiction.",
+                    "recommendation": "Ajoute un fichier JSON dans /app/Donnee_parametres.",
                 }
             },
         }

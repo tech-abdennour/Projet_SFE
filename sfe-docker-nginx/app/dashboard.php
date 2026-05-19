@@ -714,17 +714,5 @@ document.addEventListener('DOMContentLoaded',function(){
     }
 });
 </script>
-<script>
-// Suppression automatique des résultats et graphiques uniquement à la fermeture de l’onglet (pas lors d’un F5/rechargement)
-window.addEventListener('beforeunload', function(e) {
-    var nav = performance.getEntriesByType("navigation")[0];
-    if (!nav || nav.type !== "reload") {
-        sessionStorage.removeItem('lastPrediction');
-        sessionStorage.removeItem('savedGraphUrls');
-        sessionStorage.removeItem('lastFormParams');
-        sessionStorage.removeItem('activeTab');
-    }
-});
-</script>
 </body>
 </html>

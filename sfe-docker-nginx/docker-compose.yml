@@ -61,11 +61,13 @@ services:
       - "8000:8000"
     volumes:
       - ./python:/app
-      # - ./python/Donnes_Parameters:/app/Donnes_Parameters  # supprimé, dossier obsolète
       - ./python/Donnee_parametres:/app/Donnee_parametres
       - ./python/service/analysis_exports:/app/service/analysis_exports
+      - ./python/service/data:/app/service/data
+      - ./python/service/models:/app/service/models
+      - ./python/service/graphe:/app/service/graphe
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 10s
       timeout: 5s
       retries: 10

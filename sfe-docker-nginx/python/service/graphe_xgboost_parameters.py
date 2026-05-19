@@ -5,10 +5,10 @@
 Generation de graphes dynamiques pour l'analyse XGBoost.
 
 Graphes generes:
-1. gauge_circulaire_charge: jauges de saturation par ressource.
-2. courbe_erreur_vs_charge: radar comparatif des 3 plans d'hebergement.
-3. courbe_projection_saturation: courbe de projection temporelle.
-4. barres_impact_features: barres horizontales d'impact des parametres.
+1. graph_erreur_rate_contribution: histogramme combiné avec ligne de taux d'erreur
+2. graphe_radar_comparaison: radar comparatif des 3 plans d'hebergement
+3. courbe_projection_saturation: courbe de projection temporelle
+4. barres_impact_features: barres horizontales d'impact des parametres
 """
 
 from __future__ import annotations
@@ -450,7 +450,7 @@ def first_saturation_month(values: np.ndarray) -> int | None:
 
 
 # ============================================
-# GRAPHE 1: un histogramme combiné avec une ligne de taux d'erreur
+# GRAPHE 1: HISTOGRAMME TAUX D'ERREUR
 # ============================================
 
 def graph_erreur_rate_contribution(
@@ -471,28 +471,23 @@ def graph_erreur_rate_contribution(
     error_rate = min(100, (plugin_count * 1.2) + (ram_usage_max / 4) + (response_time / 250))
     """
     try:
-        # Extraire les parametres
         plugin_count = float(normalized.get("plugin_count", 0) or 0)
         ram_usage_max = float(normalized.get("ram_usage_max", 0) or 0)
         response_time = float(normalized.get("response_time", 0) or 0)
         
-        # Calculer les contributions individuelles
         contribution_plugins = plugin_count * 1.2
         contribution_ram = ram_usage_max / 4
         contribution_response = response_time / 250
         
-        # Calculer le taux d'erreur final
         error_rate = min(100, contribution_plugins + contribution_ram + contribution_response)
         error_rate = round(error_rate, 2)
         
-        # Status
         status = clean_status(prediction_field(prediction, "status"), current_load)
         
-        # Donnees pour l'histogramme
         categories = [
-            "Plugins\n({:.0f} plugins)".format(plugin_count),
-            "RAM max\n({:.0f}%)".format(ram_usage_max),
-            "Temps reponse\n({:.0f} ms)".format(response_time),
+            f"Plugins\n({plugin_count:.0f} plugins)",
+            f"RAM max\n({ram_usage_max:.0f}%)",
+            f"Temps reponse\n({response_time:.0f} ms)",
         ]
         contributions = [
             contribution_plugins,
@@ -500,27 +495,22 @@ def graph_erreur_rate_contribution(
             contribution_response,
         ]
         
-        # Calcul des valeurs cumulatives pour la ligne
         cumulative = np.cumsum(contributions)
         cumulative = np.minimum(cumulative, 100)
         
-        # Couleurs pour chaque barre
         colors_barres = ["#3b82f6", "#f59e0b", "#ef4444"]
         
-        # Creer la figure avec deux sous-graphiques
         fig = plt.figure(figsize=(16, 9))
         
-        # --- SOUS-GRAPHIQUE 1 : Histogramme des contributions ---
+        # SOUS-GRAPHIQUE 1 : Histogramme
         ax1 = plt.subplot2grid((2, 3), (0, 0), colspan=2, rowspan=2)
         
         x = np.arange(len(categories))
         width = 0.6
         
-        # Barres de l'histogramme
         bars = ax1.bar(x, contributions, width, color=colors_barres, alpha=0.85, 
                        edgecolor="white", linewidth=2)
         
-        # Ajouter les valeurs sur les barres
         for i, (bar, val) in enumerate(zip(bars, contributions)):
             height = bar.get_height()
             ax1.text(bar.get_x() + bar.get_width()/2., height + 1.5,
@@ -528,7 +518,6 @@ def graph_erreur_rate_contribution(
                     ha='center', va='bottom', fontsize=13, fontweight='bold',
                     color=colors_barres[i])
             
-            # Ajouter le detail sous la barre
             if i == 0:
                 detail = f"{plugin_count:.0f} × 1.2%"
             elif i == 1:
@@ -540,26 +529,21 @@ def graph_erreur_rate_contribution(
                     detail, ha='center', va='top', fontsize=9, 
                     color="#64748b", fontstyle='italic')
         
-        # Ligne cumulative
         ax1.plot(x, cumulative, 'o-', color="#8b5cf6", linewidth=3, markersize=12,
                 markerfacecolor="white", markeredgewidth=2.5, zorder=5,
                 label=f"Taux d'erreur cumule: {error_rate:.1f}%")
         
-        # Remplissage sous la ligne cumulative
         ax1.fill_between(x, 0, cumulative, alpha=0.1, color="#8b5cf6")
         
-        # Ligne horizontale a 100%
         ax1.axhline(y=100, color="#dc2626", linewidth=2, linestyle="--", alpha=0.6)
         ax1.text(len(categories) - 0.6, 101, "MAX 100%", fontsize=9, color="#dc2626", 
                 fontweight="bold", ha='right')
         
-        # Zones de risque
         ax1.axhspan(0, 30, color="#dcfce7", alpha=0.3)
         ax1.axhspan(30, 60, color="#fef3c7", alpha=0.3)
         ax1.axhspan(60, 85, color="#ffedd5", alpha=0.3)
         ax1.axhspan(85, 110, color="#fee2e2", alpha=0.3)
         
-        # Configuration de l'axe
         ax1.set_xticks(x)
         ax1.set_xticklabels(categories, fontsize=11, fontweight="bold")
         ax1.set_ylabel("Contribution au taux d'erreur (%)", fontsize=12, fontweight="bold")
@@ -568,28 +552,22 @@ def graph_erreur_rate_contribution(
         ax1.legend(loc="upper left", fontsize=10, framealpha=0.95)
         ax1.grid(axis='y', alpha=0.3, linestyle='--')
         
-        # Titre
         ax1.set_title(
             f"Contribution des parametres au taux d'erreur\n"
             f"Taux d'erreur final: {error_rate:.1f}% | Charge: {current_load:.1f}% | Statut: {status}",
             fontsize=14, fontweight="bold", pad=15
         )
         
-        # --- SOUS-GRAPHIQUE 2 : Jauge du taux d'erreur ---
+        # SOUS-GRAPHIQUE 2 : Jauge
         ax2 = plt.subplot2grid((2, 3), (0, 2))
         ax2.set_aspect("equal")
         ax2.axis("off")
         
-        # Jauge circulaire
         theta = np.linspace(0, np.pi, 100)
-        r = 1.0
         
-        # Fond gris
         ax2.fill_between(np.cos(theta), 0, np.sin(theta), color="#e2e8f0", alpha=0.5)
         
-        # Remplissage selon le taux d'erreur
         fill_theta = np.linspace(0, np.pi * (error_rate / 100), 100)
-        fill_r = 1.0
         
         if error_rate < 30:
             fill_color = "#16a34a"
@@ -603,24 +581,20 @@ def graph_erreur_rate_contribution(
         ax2.fill_between(np.cos(fill_theta), 0, np.sin(fill_theta), 
                          color=fill_color, alpha=0.8)
         
-        # Cercle exterieur
         circle = plt.Circle((0, 0), 1.0, fill=False, color="#334155", linewidth=3)
         ax2.add_patch(circle)
         
-        # Aiguille
         angle = np.pi * (1 - error_rate / 100)
         needle_x = 0.8 * np.cos(angle)
         needle_y = 0.8 * np.sin(angle)
         ax2.plot([0, needle_x], [0, needle_y], color="#0f172a", linewidth=3, zorder=10)
         ax2.scatter([needle_x], [needle_y], s=80, color="#0f172a", zorder=11)
         
-        # Texte central
         ax2.text(0, -0.1, f"{error_rate:.1f}%", ha="center", va="center",
                 fontsize=28, fontweight="bold", color=fill_color)
         ax2.text(0, -0.35, "Taux d'erreur", ha="center", va="center",
                 fontsize=11, color="#64748b")
         
-        # Echelles
         for pct in [0, 25, 50, 75, 100]:
             angle_scale = np.pi * (1 - pct / 100)
             x_scale = 1.1 * np.cos(angle_scale)
@@ -631,7 +605,7 @@ def graph_erreur_rate_contribution(
         ax2.set_xlim(-1.3, 1.3)
         ax2.set_ylim(-0.2, 1.3)
         
-        # --- SOUS-GRAPHIQUE 3 : Impact relatif (camembert) ---
+        # SOUS-GRAPHIQUE 3 : Camembert
         ax3 = plt.subplot2grid((2, 3), (1, 2))
         
         total_contrib = contribution_plugins + contribution_ram + contribution_response
@@ -652,7 +626,6 @@ def graph_erreur_rate_contribution(
             textprops={'fontsize': 10, 'fontweight': 'bold'}
         )
         
-        # Ameliorer la lisibilite des pourcentages
         for autotext in autotexts:
             autotext.set_color('white')
             autotext.set_fontsize(10)
@@ -660,7 +633,6 @@ def graph_erreur_rate_contribution(
         
         ax3.set_title("Repartition de l'impact", fontsize=12, fontweight="bold", pad=10)
         
-        # Ajuster la mise en page
         plt.tight_layout(pad=2)
         
         return save_figure(fig, "graph_erreur_rate_contribution")
@@ -673,10 +645,10 @@ def graph_erreur_rate_contribution(
 
 
 # ============================================
-# GRAPHE 2: RADAR COMPARATIF DES PLANS
+# GRAPHE 2: RADAR COMPARATIF DES PLANS (RENOMMÉ)
 # ============================================
 
-def courbe_erreur_vs_charge(
+def graphe_radar_comparaison(
     normalized: dict[str, Any],
     current_load: float,
     prediction: dict[str, Any] | None = None,
@@ -691,39 +663,37 @@ def courbe_erreur_vs_charge(
     - Plugins max : 5 / 15 / 50
     - CPU max : 40% / 65% / 85%
     - RAM max : 50% / 75% / 90%
-    - Stockage : 20 Go / 100 Go / 500 Go
-    - Support : Standard / Prioritaire / Premium
+    - Plugins lourds max : 0 / 7 / 7
+    - Disque utilisée max : 80% / 90% / 95%
     """
     try:
-        # Definition des 6 axes avec les valeurs MAXIMALES par plan
+        # ═══════════════════════════════════════════════════════════
+        # MODIFICATION : Support → Plugins lourds max
+        #               Stockage → Disque utilisée max (%)
+        # ═══════════════════════════════════════════════════════════
         axes_config = [
-            ("Visiteurs/j",     [2000, 15000, 150000]),
-            ("Plugins max",     [5, 15, 50]),
-            ("CPU max",         [40, 65, 85]),
-            ("RAM max",         [50, 75, 90]),
-            ("Stockage (Go)",   [20, 100, 500]),
-            ("Support",         [20, 60, 100]),
+            ("Visiteurs/j",         [2000, 15000, 150000]),
+            ("Plugins max",         [5, 15, 50]),
+            ("CPU max",             [40, 65, 85]),
+            ("RAM max",             [50, 75, 90]),
+            ("Plugins lourds max",  [0, 3, 7]),  # Medium = 3 heavy plugins
+            ("Disque utilisée max", [80, 90, 95]),
         ]
         
-        # Extraire les valeurs actuelles du site depuis les parametres normalises
+        # Extraire les valeurs actuelles du site
         visitors_actuel = float(to_float(normalized.get("visitors_per_day", 0)))
         plugins_actuel = float(to_float(normalized.get("plugin_count", 0)))
         cpu_actuel = float(to_float(normalized.get("cpu_usage_peak", 0)))
         ram_actuel = float(to_float(normalized.get("ram_usage_max", 0)))
         
-        # Stockage actuel
-        stockage_actuel = 0.0
-        disk_gb_val = normalized.get("disk_gb", None)
-        if disk_gb_val is not None:
-            try:
-                stockage_actuel = float(disk_gb_val)
-            except (ValueError, TypeError):
-                stockage_actuel = 0.0
+        # Plugins lourds actuel (nombre)
+        heavy_plugins_actuel = float(len(normalized.get("heavy_plugins", [])))
         
-        # Support actuel (base sur le plan WP)
+        # Disque utilisée max actuel (%)
+        disk_usage_max = float(to_float(normalized.get("disk_usage_max", 0)))
+        
+        # WP type
         wp_type = normalized.get("wp_type", "medium")
-        support_map = {"small": 20, "medium": 60, "performance": 100}
-        support_actuel = float(support_map.get(wp_type, 60))
         
         # Valeurs actuelles dans l'ordre des axes
         valeurs_actuelles = [
@@ -731,8 +701,8 @@ def courbe_erreur_vs_charge(
             plugins_actuel,
             cpu_actuel,
             ram_actuel,
-            stockage_actuel,
-            support_actuel,
+            heavy_plugins_actuel,
+            disk_usage_max,
         ]
         
         N = len(axes_config)
@@ -757,7 +727,6 @@ def courbe_erreur_vs_charge(
         for i, (axe_name, axe_values) in enumerate(axes_config):
             max_val = max(axe_values)
             val = (valeurs_actuelles[i] / max_val) * 100 if max_val > 0 else 0
-            # Clamper entre 0 et 105% pour que le point reste visible
             val = min(val, 105)
             user_values.append(val)
         user_values.append(user_values[0])
@@ -773,22 +742,19 @@ def courbe_erreur_vs_charge(
             ax.plot(angles, vals, color=color, linewidth=3, linestyle=ls, label=label)
             ax.fill(angles, vals, color=color, alpha=0.10)
         
-        # Tracer le profil actuel du site en bleu (surface semi-transparente)
+        # Tracer le profil actuel du site en bleu
         ax.fill(angles, user_values, color="#0ea5e9", alpha=0.15)
         ax.plot(angles, user_values, color="#0ea5e9", linewidth=2.5, linestyle="-", 
                 label=f"Votre site (charge {current_load:.0f}%)")
         
         # Points bleus sur chaque axe avec la valeur
         for i, (angle, val, val_brute) in enumerate(zip(angles[:-1], user_values[:-1], valeurs_actuelles)):
-            # Point bleu principal
             ax.scatter([angle], [val], color="#0ea5e9", s=150, zorder=10, 
                       edgecolor="white", linewidth=2)
             
-            # Etiquette avec la valeur brute
-            # Positionner l'etiquette un peu plus loin que le point
             label_r = val + 8
             if val > 80:
-                label_r = val - 8  # Pour eviter de sortir du graphique
+                label_r = val - 8
             
             # Formater la valeur brute selon l'axe
             if i == 0:  # Visiteurs
@@ -797,25 +763,24 @@ def courbe_erreur_vs_charge(
                 texte = f"{val_brute:.0f}"
             elif i in [2, 3]:  # CPU, RAM
                 texte = f"{val_brute:.0f}%"
-            elif i == 4:  # Stockage
-                texte = f"{val_brute:.0f} Go"
-            else:  # Support
-                support_labels = {20: "Standard", 60: "Prioritaire", 100: "Premium"}
-                texte = support_labels.get(val_brute, f"{val_brute:.0f}%")
+            elif i == 4:  # Plugins lourds
+                texte = f"{val_brute:.0f}"
+            else:  # Disque utilisée max
+                texte = f"{val_brute:.0f}%"
             
             ax.text(angle, label_r, texte, ha="center", va="center",
                    fontsize=9, fontweight="bold", color="#0369a1",
                    bbox=dict(boxstyle="round,pad=0.3", facecolor="white", 
                             edgecolor="#0ea5e9", alpha=0.9))
         
-        # Ajouter les labels des axes avec les valeurs brutes
+        # Labels des axes
         ax.set_xticks(angles[:-1])
         tick_labels = []
         for axe_name, axe_values in axes_config:
             tick_labels.append(f"{axe_name}\n({axe_values[0]} / {axe_values[1]} / {axe_values[2]})")
         ax.set_xticklabels(tick_labels, fontsize=10, fontweight="bold")
         
-        # Grille et echelles
+        # Grille
         ax.set_ylim(0, 110)
         ax.set_yticks([25, 50, 75, 100])
         ax.set_yticklabels(["25%", "50%", "75%", "100%"], fontsize=8, color="#64748b")
@@ -824,21 +789,22 @@ def courbe_erreur_vs_charge(
         # Titre
         status = clean_status(prediction_field(prediction, "status"), current_load)
         ax.set_title(
-            f"G6 — Comparaison des 3 plans d'hebergement (Radar)\n"
+            f"Comparaison des 3 plans d'hebergement (Radar)\n"
             f"Capacites maximales tolerees | Statut: {status}",
             fontsize=15,
             fontweight="bold",
             pad=28,
         )
         
-        # Texte gris au-dessus de la legende
+        # Texte sous la legende
         fig.text(
             0.5, 0.08,
             f"Votre site actuel — Visiteurs: {visitors_actuel:.0f}/j | "
             f"Plugins: {plugins_actuel:.0f} | "
             f"CPU pic: {cpu_actuel:.0f}% | "
             f"RAM max: {ram_actuel:.0f}% | "
-            f"Stockage: {stockage_actuel:.0f} Go | "
+            f"Plugins lourds: {heavy_plugins_actuel:.0f} | "
+            f"Disque max: {disk_usage_max:.0f}% | "
             f"Plan: {wp_type.capitalize()}",
             ha="center",
             fontsize=8.5,
@@ -847,7 +813,6 @@ def courbe_erreur_vs_charge(
             transform=fig.transFigure,
         )
         
-        # Legende
         ax.legend(
             loc="upper center",
             bbox_to_anchor=(0.5, -0.12),
@@ -857,7 +822,6 @@ def courbe_erreur_vs_charge(
             framealpha=0.95,
         )
         
-        # Annotation explicative en bas
         fig.text(
             0.5, 0.01,
             "Plus la surface est grande, plus le plan absorbe de charge. "
@@ -870,10 +834,10 @@ def courbe_erreur_vs_charge(
         
         ax.grid(True, alpha=0.3, linestyle="--")
         
-        return save_figure(fig, "courbe_erreur_vs_charge")
+        return save_figure(fig, "graphe_radar_comparaison")
         
     except Exception as exc:
-        print(f"[ERREUR] courbe_erreur_vs_charge: {exc}", file=sys.stderr)
+        print(f"[ERREUR] graphe_radar_comparaison: {exc}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         return None
@@ -902,16 +866,40 @@ def courbe_projection_saturation(
             display_months = 36
 
         months = np.arange(0, display_months + 1)
-        loads = load_projection(current_load, growth, months)
+        
+        # MODIFICATION: Ajuster le taux de croissance pour que la courbe
+        # passe EXACTEMENT par le point de saturation au bon moment
+        if saturation_month is not None and saturation_month > 0:
+            # Calculer le taux de croissance mensuel nécessaire pour atteindre
+            # exactement 90% au mois de saturation
+            # Formule: 90 = current_load * (1 + r)^saturation_month
+            # Donc: r = (90 / current_load)^(1/saturation_month) - 1
+            if current_load > 0 and current_load < SATURATION_LIMIT:
+                adjusted_growth = (SATURATION_LIMIT / current_load) ** (1.0 / saturation_month) - 1.0
+                adjusted_growth_percent = adjusted_growth * 100
+            else:
+                adjusted_growth = growth / 100.0
+                adjusted_growth_percent = growth
+        else:
+            adjusted_growth = growth / 100.0
+            adjusted_growth_percent = growth
+        
+        # Recalculer la projection avec le taux ajusté
+        loads = np.clip(current_load * ((1 + adjusted_growth) ** months), 0, 100)
 
         fig, ax = plt.subplots(figsize=(14, 8))
-        ax.fill_between(months, 0, 60, color="#dcfce7", alpha=0.45, label="Zone optimale")
+        ax.fill_between(months, 0, 60, color="#22c55e", alpha=0.28, label="Zone optimale")
         ax.fill_between(months, 60, 80, color="#fef3c7", alpha=0.45, label="Zone surveillance")
         ax.fill_between(months, 80, 100, color="#fee2e2", alpha=0.55, label="Zone critique")
 
+        # MODIFICATION: Ajouter le taux de croissance ajusté dans le label
+        growth_label = f"Projection (+{adjusted_growth_percent:.1f}%/mois)"
+        if saturation_month is not None:
+            growth_label += f" [ajusté pour saturation à {saturation_month:.1f} mois]"
+        
         ax.plot(months, loads, color="#2563eb", linewidth=3, marker="o",
                 markersize=5, markerfacecolor="white", markeredgewidth=1.5,
-                label=f"Projection (+{growth:.1f}%/mois)")
+                label=growth_label)
 
         ax.axhline(SATURATION_LIMIT, color="#dc2626", linewidth=2.5,
                    linestyle="--", label=f"Seuil saturation {SATURATION_LIMIT:.0f}%")
@@ -922,33 +910,64 @@ def courbe_projection_saturation(
                     arrowprops=dict(arrowstyle="->", color="#2563eb", lw=2),
                     fontsize=10, fontweight="bold", color="#2563eb")
 
-        break_month = first_saturation_month(loads)
         if saturation_month is not None:
+            # Le point de saturation est maintenant EXACTEMENT à l'intersection
+            # de la courbe bleue et de la ligne rouge
             exact_y = SATURATION_LIMIT
             ax.axvline(saturation_month, color="#f97316", linewidth=2.5,
                        linestyle=":", label=f"Point de rupture: {saturation_text}")
+            
+            # Point d'intersection EXACT entre courbe bleue et ligne rouge
             ax.scatter([saturation_month], [exact_y], s=220, color="#f97316",
                        edgecolor="white", linewidth=2, zorder=6)
+            
+            # Annotation du point d'intersection
             ax.annotate(
-                f"Point de rupture\n{saturation_text}\n({float(saturation_days):.0f} jours)",
+                f"POINT DE SATURATION\n{saturation_text}\n({float(saturation_days):.0f} jours)\n"
+                f"Charge: {exact_y:.1f}%",
                 xy=(saturation_month, exact_y),
-                xytext=(min(display_months - 3, saturation_month + 3), 74),
+                xytext=(min(display_months - 4, saturation_month + 4), 74),
                 arrowprops=dict(arrowstyle="->", color="#f97316", lw=2),
                 bbox=dict(boxstyle="round,pad=0.45", fc="#fff7ed", ec="#f97316", alpha=0.96),
                 fontsize=10,
                 fontweight="bold",
                 color="#9a3412",
             )
-        elif break_month is not None:
-            ax.axvline(break_month, color="#f97316", linewidth=2.5, linestyle=":")
+            
+            # Ajouter une flèche verticale pour montrer l'intersection exacte
+            ax.annotate("", xy=(saturation_month, SATURATION_LIMIT),
+                       xytext=(saturation_month, SATURATION_LIMIT + 8),
+                       arrowprops=dict(arrowstyle="->", color="#f97316", lw=1.5, alpha=0.7))
+            
+            # Ajouter un cercle autour du point d'intersection
+            circle = Circle((saturation_month, SATURATION_LIMIT), 0.8, 
+                          fill=False, color="#f97316", linewidth=2, alpha=0.5)
+            ax.add_patch(circle)
 
         ax.set_xlim(0, display_months)
         ax.set_ylim(0, 105)
         ax.set_xlabel("Mois apres prediction", fontweight="bold")
         ax.set_ylabel("Charge serveur (%)", fontweight="bold")
-        ax.set_title("Courbe Projection Saturation", fontsize=16, fontweight="bold")
+        ax.set_title(
+            "Courbe Projection Saturation\n"
+            f"Intersection exacte au point de saturation ({SATURATION_LIMIT:.0f}%)",
+            fontsize=16, 
+            fontweight="bold"
+        )
         ax.legend(loc="lower right", framealpha=0.95)
         ax.grid(alpha=0.25, linestyle="--")
+        
+        # Ajouter un texte explicatif
+        if saturation_month is not None:
+            ax.text(0.5, -0.12,
+                   f"✓ La courbe bleue passe EXACTEMENT par le point d'intersection "
+                   f"de la ligne rouge (seuil {SATURATION_LIMIT:.0f}%) et de l'axe orange "
+                   f"(mois {saturation_month:.1f})",
+                   transform=ax.transAxes,
+                   ha='center',
+                   fontsize=9,
+                   color="#64748b",
+                   fontstyle='italic')
 
         return save_figure(fig, "courbe_projection_saturation")
     except Exception as exc:
@@ -1121,7 +1140,7 @@ def generate_all_graphs():
 
     graphs, errors = {}, {}
     generators = {
-        "radar_comparaison": lambda: courbe_erreur_vs_charge(normalized, current_load, prediction_result),
+        "radar_comparaison": lambda: graphe_radar_comparaison(normalized, current_load, prediction_result),
         "courbe_projection_saturation": lambda: courbe_projection_saturation(normalized, current_load, prediction_result),
         "barres_impact_features": lambda: barres_impact_features(normalized, current_load, prediction_result),
         "graph_erreur_rate_contribution": lambda: graph_erreur_rate_contribution(normalized, current_load, prediction_result),
