@@ -99,6 +99,16 @@ function getSavedResults($pdo) {
     catch (Exception $e) { return []; }
 }
 
+function clearSavedResults($pdo) {
+    if ($pdo === null) return false;
+    try {
+        $pdo->exec("DELETE FROM saved_results");
+        return true;
+    } catch (Exception $e) {
+        return false;
+    }
+}
+
 function savePrediction($pdo, $data, &$errorMsg = null) {
     if ($pdo === null || !isset($_SESSION['user'])) { $errorMsg = 'Erreur connexion'; return false; }
     try {
@@ -171,6 +181,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
             if ($data['action'] === 'save_params' && isset($data['params_data'])) {
                 $ok = saveResultJson($pdo, $data['params_data'], 'parametres');
                 ajax_json_response(['success' => $ok]);
+            }
+            if ($data['action'] === 'clear_saved_results') {
+                ajax_json_response(['success' => clearSavedResults($pdo)]);
             }
         }
         if (isset($data['predicted_load'])) { $prediction = ['id' => uniqid(), 'created_at' => date('Y-m-d H:i:s'), 'cpu_usage_avg' => $data['cpu_usage_avg'] ?? '', 'cpu_usage_peak' => $data['cpu_usage_peak'] ?? '', 'ram_usage_avg' => $data['ram_usage_avg'] ?? '', 'ram_usage_max' => $data['ram_usage_max'] ?? '', 'disk_usage_avg' => $data['disk_usage_avg'] ?? '', 'disk_usage_max' => $data['disk_usage_max'] ?? '', 'disk_read_iops' => $data['disk_read_iops'] ?? '', 'disk_write_iops' => $data['disk_write_iops'] ?? '', 'response_time' => $data['response_time'] ?? '', 'visitors_per_day' => $data['visitors_per_day'] ?? '', 'pageviews_per_day' => $data['pageviews_per_day'] ?? '', 'traffic_growth_rate' => $data['traffic_growth_rate'] ?? '', 'peak_hours_start' => $data['peak_hours_start'] ?? '', 'peak_hours_end' => $data['peak_hours_end'] ?? '', 'peak_hours' => $data['peak_hours'] ?? '', 'plugin_count' => $data['plugin_count'] ?? '', 'heavy_plugins' => $data['heavy_plugins'] ?? '', 'php_version' => $data['php_version'] ?? '', 'cache_enabled' => $data['cache_enabled'] ?? '', 'cdn_enabled' => $data['cdn_enabled'] ?? '', 'wp_type' => $data['wp_type'] ?? '', 'predicted_load' => $data['predicted_load'] ?? '', 'error_rate' => $data['error_rate'] ?? '', 'saturation_days' => $data['saturation_days'] ?? '', 'saturation_months' => $data['saturation_months'] ?? '', 'saturation_jours' => $data['saturation_jours'] ?? '', 'saturation_text' => $data['saturation_text'] ?? '', 'saturation_months_raw' => $data['saturation_months_raw'] ?? '', 'status' => $data['status'] ?? '', 'recommendation' => $data['recommendation'] ?? '', 'save_type' => 'Manuel']; $errorMsg = null; ajax_json_response(['success' => savePrediction($pdo, $prediction, $errorMsg), 'error' => $errorMsg]); }
@@ -513,11 +526,21 @@ function resetCurrentAnalysis(){
     document.getElementById('noGraphMessage').style.display='block';document.getElementById('generatedGraphsContainer').style.display='none';document.getElementById('generatedGraphsContainer').innerHTML='';
     document.getElementById('btnCreateGraph').disabled=false;document.getElementById('btnCreateGraph').textContent='📊 Créer les graphiques';
     document.getElementById('btnCreateGraph').classList.add('ready');
-    fetch('http://localhost:8000/api/reset/parameters-and-images',{method:'POST',headers:{'Content-Type':'application/json'}})
-    .then(function(r){return r.json();})
-    .then(function(data){
-        if(data.status==='success'){showToast('✅ Tout est réinitialisé !');}
-        else{showToast('⚠️ '+(data.message||'Erreur'),true);}
+    var clearSavedResultsRequest=fetch('dashboard.php',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+        body:JSON.stringify({action:'clear_saved_results'})
+    }).then(function(r){return r.json();});
+
+    var resetApiRequest=fetch('http://localhost:8000/api/reset/parameters-and-images',{method:'POST',headers:{'Content-Type':'application/json'}})
+    .then(function(r){return r.json();});
+
+    Promise.all([clearSavedResultsRequest,resetApiRequest])
+    .then(function(results){
+        var clearRes=results[0]||{};
+        var apiRes=results[1]||{};
+        if(clearRes.success && apiRes.status==='success'){showToast('✅ Tout est réinitialisé !');}
+        else{showToast('⚠️ Réinitialisation partielle',true);}
         showTab('dashboard');btn.disabled=false;btn.innerHTML='<span>🔄</span> Réinitialiser';btn.style.opacity='1';
     })
     .catch(function(err){showToast('⚠️ Erreur API');btn.disabled=false;btn.innerHTML='<span>🔄</span> Réinitialiser';btn.style.opacity='1';});
