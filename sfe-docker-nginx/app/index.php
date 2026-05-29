@@ -54,7 +54,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     <meta charset="UTF-8">
     <link rel="icon" type="image/png" href="logos.png">
     <title>Connexion - SFE Project</title>
-    <script src="https://unpkg.com/feather-icons"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -91,6 +90,20 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             color: #888;
             width: 18px;
             height: 18px;
+        }
+
+        .icon-svg {
+            width: 18px;
+            height: 18px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .hidden {
+            display: none;
         }
 
         input {
@@ -171,16 +184,35 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
     <form method="POST">
         <div class="input-group">
-            <i data-feather="user" class="field-icon"></i>
+            <span class="field-icon" aria-hidden="true">
+                <svg class="icon-svg" viewBox="0 0 24 24">
+                    <path d="M20 21a8 8 0 0 0-16 0"></path>
+                    <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+            </span>
             <input type="text" name="username" placeholder="Nom d'utilisateur" required>
         </div>
 
         <div class="input-group">
-            <i data-feather="lock" class="field-icon"></i>
+            <span class="field-icon" aria-hidden="true">
+                <svg class="icon-svg" viewBox="0 0 24 24">
+                    <rect x="3" y="11" width="18" height="10" rx="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+            </span>
             <input type="password" id="password" name="password" placeholder="Mot de passe" required style="padding-right: 40px;">
             
             <span class="password-toggle" onclick="togglePassword()">
-                <i data-feather="eye" id="eyeIcon" style="width: 18px;"></i>
+                <svg class="icon-svg" id="eyeOpen" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                <svg class="icon-svg hidden" id="eyeClosed" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M17.94 17.94A10.9 10.9 0 0 1 12 19c-7 0-11-7-11-7a21.77 21.77 0 0 1 5.06-5.94"></path>
+                    <path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.91 21.91 0 0 1-2.16 3.19"></path>
+                    <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"></path>
+                    <line x1="1" y1="1" x2="23" y2="23"></line>
+                </svg>
             </span>
         </div>
         
@@ -199,21 +231,20 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 </div>
 
 <script>
-    feather.replace();
-
     function togglePassword() {
         const input = document.getElementById("password");
-        const icon = document.getElementById("eyeIcon");
+        const eyeOpen = document.getElementById("eyeOpen");
+        const eyeClosed = document.getElementById("eyeClosed");
 
         if (input.type === "password") {
             input.type = "text";
-            icon.setAttribute("data-feather", "eye-off");
+            eyeOpen.classList.add("hidden");
+            eyeClosed.classList.remove("hidden");
         } else {
             input.type = "password";
-            icon.setAttribute("data-feather", "eye");
+            eyeOpen.classList.remove("hidden");
+            eyeClosed.classList.add("hidden");
         }
-
-        feather.replace();
     }
 </script>
 
